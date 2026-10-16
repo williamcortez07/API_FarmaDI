@@ -13,5 +13,37 @@ services:
       - JwtSettings__SecretKey=${JWT_SECRET:-X9fL7vQp2eTgB6mYzWcR1uJkAoNsHdEiVqPl}
       - JwtSettings__Issuer=${JWT_ISSUER:-https://api.FarmaDi.com}
       - JwtSettings__Audience=${JWT_AUDIENCE:-https://api.FarmaDi.com}
+      - MongoLogSettings__ConnectionString=mongodb://mongodb-logs:27017
+      - MongoLogSettings__DatabaseName=SystemLogsDb
+      - MongoLogSettings__CollectionName=AuditLogs
+      - MongoLogSettings__RetentionDays=30
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    depends_on:
+      - mongodb-logs
+
+  mongodb-logs:
+    image: mongo:latest
+    container_name: srv_mongodb_logs
+    restart: always
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: SystemLogsDb
+    volumes:
+      - mongo_logs_volume:/data/db
+
+  mongo-express:
+    image: mongo-express:latest
+    container_name: srv_mongo_express_ui
+    restart: always
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: mongodb-logs
+      ME_CONFIG_MONGODB_PORT: 27017
+    depends_on:
+      - mongodb-logs
+
+volumes:
+  mongo_logs_volume:
