@@ -78,14 +78,19 @@ Sigue estos pasos para levantar el entorno de desarrollo local:
         }
         ```
 
-3.  **Aplicar Migraciones / Scripts:**
+3.  **Configurar secretos:**
+    *   Para Docker Compose, copia `.env.example` a `.env` y configura una clave JWT aleatoria, única y de al menos 32 bytes, junto con las credenciales requeridas. No reutilices claves ni confirmes `.env` al repositorio.
+    *   Para ejecutar con `dotnet run`, configura `JwtSettings__SecretKey` como variable de entorno; la aplicación no inicia si falta o es demasiado corta.
+    *   Si credenciales anteriores estuvieron versionadas, rótalas: quitar `.env` del índice no las elimina del historial de Git.
+
+4.  **Aplicar Migraciones / Scripts:**
     *   Si usas *Entity Framework*:
         ```bash
         dotnet ef database update
         ```
     *   Si usas *Scripts SQL puros/Dapper*, ejecuta el script de creación de tablas y *Stored Procedures* ubicado en la carpeta `/ScriptsSQL`.
 
-4.  **Ejecutar la API:**
+5.  **Ejecutar la API:**
     ```bash
     dotnet run
     ```

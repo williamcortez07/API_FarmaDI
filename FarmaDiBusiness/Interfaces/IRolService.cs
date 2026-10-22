@@ -1,10 +1,7 @@
-﻿using FarmaDiBusiness.DTOs.Roles;
+using FarmaDiBusiness.DTOs.Roles;
 using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace FarmaDiBusiness.Interfaces
@@ -17,5 +14,6 @@ namespace FarmaDiBusiness.Interfaces
         Task<ServiceResponse<Roles>> UpdateRolAsync(int id, UpdateRolDto rol);
         Task<ServiceResponse<Roles>> GetRolByNameAsync(string name);
         Task<ServiceResponse<Roles>> SetRolStateAsync(int id, bool state);
+        Task<ServiceResponse<(IEnumerable<Roles> Items, int TotalCount)>> GetRolesPagedAsync(int page, int limit);
     }
 }

@@ -1,4 +1,4 @@
-﻿using FarmaDiCore.Common;
+using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
 using FarmaDiDataAccess.Interfaces;
 using Microsoft.Data.SqlClient;
@@ -7,249 +7,134 @@ using System;
 using System.Collections.Generic;
 using System.Data;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
-
-public class ConcentrationRepository  : IConcentrationRepository
+namespace FarmaDiDataAccess.Repositories
 {
-    private readonly string _connectionString;
-
-   public ConcentrationRepository(IConfiguration configuration)
+    public class ConcentrationRepository : IConcentrationRepository
     {
-        _connectionString = configuration.GetConnectionString("DefaultConnection")!;
-    }
+        private readonly string _connectionString;
 
-    /*
-    // Agregar una concentración
-    public async Task<RepositoryResponse<Concentration>> AddAsync(Concentration concentration)
-    {
-        var response = new Concentration();
-        try 
+        public ConcentrationRepository(IConfiguration configuration)
         {
-
-            using(SqlConnection connection = new SqlConnection(_connectionString))
-            {
-                await connection.OpenAsync();
-                SqlCommand cmd = new SqlCommand("USP_Concentration", connection);
-                cmd.CommandType = CommandType.StoredProcedure;
-
-
-                cmd.Parameters.AddWithValue("@ConcentrationName", concentration.ConcentrationName);
-                cmd.Parameters.AddWithValue("@ConcentrationDescription", concentration.ConcentrationDescription);
-                cmd.Parameters.AddWithValue("@IsActive", concentration.IsActive);
-
-                cmd.Parameters.Add("@ReturnValue", SqlDbType.Int).Direction = ParameterDirection.ReturnValue;
-
-
-                await cmd.ExecuteNonQueryAsync();
-                var returnedValue = Convert.ToInt32(cmd.Parameters["@ReturnValue"].Value);
-                response.Data = returnedValue;
-                response.OperationStatusCode = 0;
-
-
-            }
-        }
-        catch(SqlException ex)
-        {
-            response.Data = -1;
-            response.OperationStatusCode = ex.Number;
-
+            _connectionString = configuration.GetConnectionString("DefaultConnection")!;
         }
 
-        return response;
-    }
-
-    */
-    // Obtener todas las concentraciones
-    public async Task<RepositoryResponse<IEnumerable<Concentrations>>> GetAllAsync()
-    {
-        var list = new List<Concentrations>();
-        var response = new RepositoryResponse<IEnumerable<Concentrations>>();
-
-        try
+        public async Task<RepositoryResponse<IEnumerable<Concentrations>>> GetAllAsync()
         {
-            using (SqlConnection connection = new SqlConnection(_connectionString))
-            {
-                await connection.OpenAsync();
-                SqlCommand cmd = new SqlCommand("USP_GetConcentration", connection);
-                cmd.CommandType = CommandType.StoredProcedure;
-                cmd.Parameters.Add("@ReturnValue", SqlDbType.Int).Direction = ParameterDirection.ReturnValue;
+            var list = new List<Concentrations>();
+            var response = new RepositoryResponse<IEnumerable<Concentrations>>();
 
-                using (var reader = await cmd.ExecuteReaderAsync())
+            try
+            {
+                using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
-                    while (await reader.ReadAsync())
+                    await connection.OpenAsync();
+                    SqlCommand cmd = new SqlCommand("USP_GetConcentration", connection);
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.Add("@ReturnValue", SqlDbType.Int).Direction = ParameterDirection.ReturnValue;
+
+                    using (var reader = await cmd.ExecuteReaderAsync())
                     {
-                        list.Add(new Concentrations
+                        while (await reader.ReadAsync())
                         {
-                            ConcentrationId = (int)reader["ConcentrationId"],
-                            Volume = reader["Volume"].ToString()!,
-                            porcentage = reader["Porcentage"].ToString(),
-                            IsActive = (bool)reader["Isactive"]
-                        });
+                            list.Add(new Concentrations
+                            {
+                                ConcentrationId = (int)reader["ConcentrationId"],
+                                Volume = reader["Volume"].ToString()!,
+                                porcentage = reader["Porcentage"].ToString(),
+                                IsActive = (bool)reader["Isactive"]
+                            });
+                        }
                     }
+
+                    var returnedValue = Convert.ToInt32(cmd.Parameters["@ReturnValue"].Value);
+                    response.Data = list;
+                    response.OperationStatusCode = returnedValue;
                 }
-
-                var returnedValue = Convert.ToInt32(cmd.Parameters["@ReturnValue"].Value);
-
-                response.Data = list;
-                response.OperationStatusCode = returnedValue;
             }
-        }
-        catch (SqlException ex)
-        {
-            response.Data = null;
-            response.OperationStatusCode = ex.Number;
-        }
-        catch (Exception ex)
-        {
-            response.Data = null;
-            response.OperationStatusCode = -1;
-            response.Message = ex.Message;
-        }
-
-        return response;
-    }
-    /*
-    // Obtener concentración por ID
-    public async Task<RepositoryResponse<Concentrations>> GetByIdAsync(int id)
-    {
-        var response = new RepositoryResponse<int>();
-        try
-        {
-            using (SqlConnection connection = new SqlConnection(_connectionString))
+            catch (SqlException ex)
             {
-                await connection.OpenAsync();
-                SqlCommand cmd = new SqlCommand("USP_GetConcentrationById", connection);
-                cmd.CommandType = CommandType.StoredProcedure;
-                cmd.Parameters.AddWithValue("@ConcentrationId", id);
-                cmd.Parameters.Add("@ReturnValue", SqlDbType.Int).Direction = ParameterDirection.ReturnValue;
+                response.Data = null;
+                response.OperationStatusCode = ex.Number;
+                response.Message = ex.Message;
+            }
+            catch (Exception ex)
+            {
+                response.Data = null;
+                response.OperationStatusCode = -1;
+                response.Message = ex.Message;
+            }
 
-               
+            return response;
+        }
 
-                var returnedValue = Convert.ToInt32(cmd.Parameters["@ReturnValue"].Value);
+        public async Task<RepositoryResponse<(IEnumerable<Concentrations> Items, int TotalCount)>> GetConcentrationsPagedAsync(int pageNumber, int pageSize)
+        {
+            var list = new List<Concentrations>();
+            int totalCount = 0;
 
-                return new RepositoryResponse<Concentrations>
+            try
+            {
+                using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
-                    Data = response,
-                    OperationStatusCode = returnedValue
+                    await connection.OpenAsync();
+                    SqlCommand cmd = new SqlCommand("USP_GetConcentrationPage", connection);
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@PageNumber", pageNumber);
+                    cmd.Parameters.AddWithValue("@PageSize", pageSize);
+
+                    var totalRecordsParam = new SqlParameter("@TotalRecords", SqlDbType.Int)
+                    {
+                        Direction = ParameterDirection.Output
+                    };
+                    cmd.Parameters.Add(totalRecordsParam);
+
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            list.Add(new Concentrations
+                            {
+                                ConcentrationId = (int)reader["ConcentrationId"],
+                                Volume = reader["Volume"].ToString()!,
+                                porcentage = reader["Porcentage"].ToString(),
+                                IsActive = (bool)reader["Isactive"]
+                            });
+                        }
+                    }
+
+                    if (totalRecordsParam.Value != DBNull.Value)
+                    {
+                        totalCount = Convert.ToInt32(totalRecordsParam.Value);
+                    }
+
+                    return new RepositoryResponse<(IEnumerable<Concentrations> Items, int TotalCount)>
+                    {
+                        Data = (list, totalCount),
+                        OperationStatusCode = 0,
+                        Message = "Operación exitosa"
+                    };
+                }
+            }
+            catch (SqlException ex)
+            {
+                return new RepositoryResponse<(IEnumerable<Concentrations> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Concentrations>(), 0),
+                    OperationStatusCode = ex.Number,
+                    Message = ex.Message
+                };
+            }
+            catch (Exception ex)
+            {
+                return new RepositoryResponse<(IEnumerable<Concentrations> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Concentrations>(), 0),
+                    OperationStatusCode = -1,
+                    Message = ex.Message
                 };
             }
         }
-        catch (SqlException ex)
-        {
-            return new RepositoryResponse<Concentrations>
-            {
-                Data = null,
-                OperationStatusCode = ex.Number,
-                Message = ex.Message
-            };
-        }
     }
-    /*
-    // Actualizar concentración
-    public async Task<RepositoryResponse<Concentration>> UpdateAsync(int id, Concentration concentration)
-    {
-        try
-        {
-            using (SqlConnection connection = new SqlConnection(_connectionString))
-            {
-                await connection.OpenAsync();
-                SqlCommand cmd = new SqlCommand("USP_UpdateConcentration", connection);
-                cmd.CommandType = CommandType.StoredProcedure;
-
-                cmd.Parameters.AddWithValue("@ConcentrationId", id);
-                cmd.Parameters.AddWithValue("@ConcentrationName", concentration.ConcentrationName);
-                cmd.Parameters.AddWithValue("@ConcentrationDescription", concentration.ConcentrationDescription);
-                cmd.Parameters.AddWithValue("@IsActive", concentration.IsActive);
-                cmd.Parameters.Add("@ReturnValue", SqlDbType.Int).Direction = ParameterDirection.ReturnValue;
-
-                Concentration updated = null;
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        updated = new Concentration
-                        {
-                            ConcentrationId = (int)reader["ConcentrationId"],
-                            ConcentrationName = reader["ConcentrationName"].ToString()!,
-                            ConcentrationDescription = reader["ConcentrationDescription"].ToString(),
-                            IsActive = (bool)reader["IsActive"]
-                        };
-                    }
-                }
-
-                return new RepositoryResponse<Concentration>
-                {
-                    Data = updated,
-                    OperationStatusCode = updated != null ? 0 : 1
-                };
-            }
-        }
-        catch (SqlException ex)
-        {
-            return new RepositoryResponse<Concentration>
-            {
-                Data = null,
-                OperationStatusCode = ex.Number,
-                Message = ex.Message
-            };
-        }
-    }
-
-    // Cambiar estado (Activar/Desactivar)
-    public async Task<RepositoryResponse<Concentration>> SetStateAsync(int id, bool state)
-    {
-        try
-        {
-            using (SqlConnection connection = new SqlConnection(_connectionString))
-            {
-                await connection.OpenAsync();
-
-                SqlCommand cmd = new SqlCommand("USP_UpdateConcentrationStatus", connection);
-                cmd.CommandType = CommandType.StoredProcedure;
-                cmd.Parameters.AddWithValue("@ConcentrationId", id);
-                cmd.Parameters.AddWithValue("@IsActive", state);
-
-                Concentration updated = null;
-
-                using (var reader = await cmd.ExecuteReaderAsync())
-                {
-                    if (await reader.ReadAsync())
-                    {
-                        updated = new Concentration
-                        {
-                            ConcentrationId = (int)reader["ConcentrationId"],
-                            ConcentrationName = reader["ConcentrationName"].ToString(),
-                            ConcentrationDescription = reader["ConcentrationDescription"].ToString(),
-                            IsActive = (bool)reader["IsActive"]
-                        };
-                    }
-                }
-
-                return new RepositoryResponse<Concentration>
-                {
-                    Data = updated,
-                    OperationStatusCode = updated != null ? 0 : 1
-                };
-            }
-        }
-        catch (Exception ex)
-        {
-            return new RepositoryResponse<Concentration>
-            {
-                Data = null,
-                OperationStatusCode = -1,
-                Message = ex.Message
-            };
-        }
-    }
-
-    public Task<RepositoryResponse<Concentration>> GetByNameAsync(string name)
-    {
-        throw new NotImplementedException();
-    }
-
-    */
 }

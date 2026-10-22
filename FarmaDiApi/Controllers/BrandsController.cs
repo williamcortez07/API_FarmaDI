@@ -1,17 +1,12 @@
-﻿using FarmaDiBusiness.DTOs;
+using FarmaDiBusiness.DTOs;
 using FarmaDiBusiness.DTOs.ProductDto;
 using FarmaDiBusiness.Interfaces;
-using FarmaDiCore.Common;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
 
 namespace FarmaDiApi.Controllers
 {
     [Route("api/[controller]")]
-    [ApiController]
-    //[Authorize]
-    public class BrandsController : ControllerBase
+    public class BrandsController : BaseApiController
     {
         private readonly IBrandsService _brandsService;
 
@@ -23,13 +18,18 @@ namespace FarmaDiApi.Controllers
         [HttpPost]
         public async Task<IActionResult> Add([FromBody] AddBrandDto addBrandDto)
         {
+            if (addBrandDto == null)
+            {
+                return BadRequestError("El cuerpo de la solicitud no puede estar vacío.");
+            }
+
             var serviceResponse = await _brandsService.AddAsync(addBrandDto);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var brandDto = new BrandDto
                 {
-                    BrandId = serviceResponse.Data!.BrandId,
+                    BrandId = serviceResponse.Data.BrandId,
                     Name = serviceResponse.Data.BrandName,
                     Description = serviceResponse.Data.Description,
                     IsActive = serviceResponse.Data.IsActive,
@@ -41,21 +41,9 @@ namespace FarmaDiApi.Controllers
                     brandDto);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.Conflict:
-                    unsuccessfulResponse.Code = "409";
-                    unsuccessfulResponse.Message = "El nombre de la marca ya existe";
-                    unsuccessfulResponse.Details = new { info = "No se puede duplicar el nombre de marca" };
-                    return Conflict(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customConflictMessage: "El nombre de la marca ya existe");
         }
 
         [HttpGet]
@@ -63,66 +51,37 @@ namespace FarmaDiApi.Controllers
         {
             var serviceResponse = await _brandsService.GetAllAsync();
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                var brandsDtoCollection = serviceResponse.Data!.Select(b => new GetAllBrandsDto
+                var brandsDtoCollection = serviceResponse.Data.Select(b => new GetAllBrandsDto
                 {
                     BrandId = b.BrandId,
                     BrandName = b.BrandName,
                     BrandDescription = b.Description,
                     IsActive = b.IsActive
-                }).ToList();
+                });
 
-                var apiResponse = new ApiResponse<IEnumerable<GetAllBrandsDto>>
-                {
-                    Data = brandsDtoCollection,
-                    Meta = new
-                    {
-                        TotalAmount = brandsDtoCollection.Count,
-                        message = serviceResponse.Message
-                    }
-                };
-                return Ok(apiResponse);
+                return Ok(BuildCollectionResponse(brandsDtoCollection, serviceResponse.Message));
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NoData:
-                    unsuccessfulResponse.Code = "200";
-                    unsuccessfulResponse.Message = "No se encontraron registros";
-                    unsuccessfulResponse.Details = new { info = "Temporalmente no hay registros en la BD" };
-                    return Ok(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = "Error interno en la aplicación" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(serviceResponse);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            if (id <= 0)
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
             {
-                var response = new UnsuccessfulResponseDto
-                {
-                    Code = "400",
-                    Message = "Id proporcionado debe de ser mayor a 0",
-                    Details = new { info = "Error en el formato de valor enviado" }
-                };
-                return BadRequest(response);
+                return validationError!;
             }
 
             var serviceResponse = await _brandsService.GetByIdAsync(id);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var brandDto = new BrandDto
                 {
-                    BrandId = serviceResponse.Data!.BrandId,
+                    BrandId = serviceResponse.Data.BrandId,
                     Name = serviceResponse.Data.BrandName,
                     Description = serviceResponse.Data.Description,
                     IsActive = serviceResponse.Data.IsActive,
@@ -131,84 +90,61 @@ namespace FarmaDiApi.Controllers
                 return Ok(brandDto);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró una marca asociada al Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "No se encontró el recurso solicitado" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno no esperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró una marca asociada al Id proporcionado");
         }
 
         [HttpPut("{id}")]
-        public async Task<IActionResult> Update(int id, [FromBody] UpdateBrandDto dataBrand)
+        public async Task<IActionResult> Update(int id, [FromBody] UpdateBrandDto brand)
         {
-            var serviceResponse = await _brandsService.UpdateAsync(id, dataBrand);
-
-            if (serviceResponse.IsSuccess)
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
             {
-                var updatedBrand = new BrandDto
+                return validationError!;
+            }
+
+            if (brand == null)
+            {
+                return BadRequestError("El cuerpo de la solicitud no puede estar vacío.");
+            }
+
+            var serviceResponse = await _brandsService.UpdateAsync(id, brand);
+
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
+            {
+                var updated = new BrandDto
                 {
-                    BrandId = serviceResponse.Data!.BrandId,
+                    BrandId = serviceResponse.Data.BrandId,
                     Name = serviceResponse.Data.BrandName,
                     Description = serviceResponse.Data.Description,
                     IsActive = serviceResponse.Data.IsActive,
                 };
 
-                return Ok(updatedBrand);
+                return Ok(updated);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.ErrorValidation:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró Marca con el Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Recurso no encontrado" };
-                    return NotFound(unsuccessfulResponse);
-
-                case MessageCodes.Conflict:
-                    unsuccessfulResponse.Code = "409";
-                    unsuccessfulResponse.Message = "El registro no pudo guardarse por un conflicto";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Hubo conflicto en la actualización" };
-                    return Conflict(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró una marca con el Id proporcionado");
         }
 
         [HttpGet("byname/{name}")]
         public async Task<IActionResult> GetByName(string name)
         {
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-
-            if (name.IsNullOrEmpty())
+            if (string.IsNullOrWhiteSpace(name))
             {
-                unsuccessfulResponse.Code = "400";
-                unsuccessfulResponse.Message = "El dato proporcionado no es válido";
-                unsuccessfulResponse.Details = new { Error = "El nombre no puede ser nulo o vacío" };
-                return BadRequest(unsuccessfulResponse);
+                return BadRequestError(
+                    "El dato proporcionado no es válido",
+                    new { Error = "El nombre no puede ser nulo o vacío" });
             }
 
             var serviceResponse = await _brandsService.GetByNameAsync(name);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var brandDto = new BrandDto
                 {
-                    BrandId = serviceResponse.Data!.BrandId,
+                    BrandId = serviceResponse.Data.BrandId,
                     Name = serviceResponse.Data.BrandName,
                     Description = serviceResponse.Data.Description,
                     IsActive = serviceResponse.Data.IsActive,
@@ -217,65 +153,45 @@ namespace FarmaDiApi.Controllers
                 return Ok(brandDto);
             }
 
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = serviceResponse.Message ?? "Marca no encontrada";
-                    unsuccessfulResponse.Details = new { Error = "El recurso solicitado no está disponible en el servidor" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = serviceResponse.Message ?? "Ocurrió un error inesperado";
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "Marca no encontrada");
         }
 
         [HttpPatch("{id}/state")]
         public async Task<IActionResult> SetState(int id, [FromQuery] bool state)
         {
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
+            {
+                return validationError!;
+            }
+
             var serviceResponse = await _brandsService.SetStateAsync(id, state);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 return Ok(new
                 {
-                    BrandId = serviceResponse.Data!.BrandId,
+                    BrandId = serviceResponse.Data.BrandId,
                     BrandName = serviceResponse.Data.BrandName,
                     IsActive = serviceResponse.Data.IsActive,
                     Message = serviceResponse.Message
                 });
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                case MessageCodes.ErrorValidation:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró Marca con el Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Recurso no encontrado" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró una marca con el Id proporcionado");
         }
 
         [HttpGet("paged")]
         public async Task<IActionResult> GetPaged([FromQuery] int page = 1, [FromQuery] int limit = 10)
         {
-            if (page <= 0) page = 1;
-            if (limit <= 0) limit = 10;
-            if (limit > 100) limit = 100;
+            NormalizePagination(ref page, ref limit);
 
             var serviceResponse = await _brandsService.GetBrandsPagedAsync(page, limit);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data.Item1 != null)
             {
                 var (brands, totalCount) = serviceResponse.Data;
                 var brandsCollection = brands.Select(b => new GetAllBrandsDto
@@ -284,40 +200,12 @@ namespace FarmaDiApi.Controllers
                     BrandName = b.BrandName,
                     BrandDescription = b.Description,
                     IsActive = b.IsActive
-                }).ToList();
+                });
 
-                int totalPages = (int)Math.Ceiling(totalCount / (double)limit);
-
-                var apiResponse = new ApiResponse<IEnumerable<GetAllBrandsDto>>
-                {
-                    Data = brandsCollection,
-                    Meta = new GetPagedDto
-                    {
-                        TotalItems = totalCount,
-                        TotalPages = totalPages,
-                        CurrentPage = page,
-                        ItemsPerPage = limit
-                    }
-                };
-                return Ok(apiResponse);
+                return Ok(BuildPagedResponse(brandsCollection, totalCount, page, limit));
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                case MessageCodes.NoData:
-                    unsuccessfulResponse.Code = "200";
-                    unsuccessfulResponse.Message = "No se encontraron registros";
-                    unsuccessfulResponse.Details = new { info = "Temporalmente no hay registros en la BD" };
-                    return Ok(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = "Error interno en la aplicación" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(serviceResponse);
         }
     }
 }

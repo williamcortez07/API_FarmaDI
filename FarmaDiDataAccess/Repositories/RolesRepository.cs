@@ -1,4 +1,4 @@
-﻿using FarmaDiCore.Common;
+using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
 using FarmaDiDataAccess.Interfaces;
 using Microsoft.Data.SqlClient;
@@ -317,6 +317,73 @@ namespace FarmaDiDataAccess.Repositories
                 return new RepositoryResponse<Roles>
                 {
                     Data = null,
+                    OperationStatusCode = -1,
+                    Message = ex.Message
+                };
+            }
+        }
+    
+        public async Task<RepositoryResponse<(IEnumerable<Roles> Items, int TotalCount)>> GetRolesPagedAsync(int pageNumber, int pageSize)
+        {
+            var roleList = new List<Roles>();
+            int totalCount = 0;
+
+            try
+            {
+                using (SqlConnection connection = new SqlConnection(_connectionString))
+                {
+                    await connection.OpenAsync();
+                    SqlCommand cmd = new SqlCommand("USP_GetRolesPaged", connection);
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@PageNumber", pageNumber);
+                    cmd.Parameters.AddWithValue("@PageSize", pageSize);
+
+                    var totalRecordsParam = new SqlParameter("@TotalRecords", SqlDbType.Int)
+                    {
+                        Direction = ParameterDirection.Output
+                    };
+                    cmd.Parameters.Add(totalRecordsParam);
+
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            roleList.Add(new Roles
+                            {
+                                Id = (int)reader["RolId"],
+                                RolName = reader["RolName"].ToString()!,
+                                IsActive = (bool)reader["IsActive"]
+                            });
+                        }
+                    }
+
+                    if (totalRecordsParam.Value != DBNull.Value)
+                    {
+                        totalCount = Convert.ToInt32(totalRecordsParam.Value);
+                    }
+
+                    return new RepositoryResponse<(IEnumerable<Roles> Items, int TotalCount)>
+                    {
+                        Data = (roleList, totalCount),
+                        OperationStatusCode = 0,
+                        Message = "Operación exitosa"
+                    };
+                }
+            }
+            catch (SqlException ex)
+            {
+                return new RepositoryResponse<(IEnumerable<Roles> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Roles>(), 0),
+                    OperationStatusCode = ex.Number,
+                    Message = ex.Message
+                };
+            }
+            catch (Exception ex)
+            {
+                return new RepositoryResponse<(IEnumerable<Roles> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Roles>(), 0),
                     OperationStatusCode = -1,
                     Message = ex.Message
                 };

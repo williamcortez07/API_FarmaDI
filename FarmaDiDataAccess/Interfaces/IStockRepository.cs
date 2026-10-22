@@ -1,9 +1,6 @@
-﻿using FarmaDiCore.Common;
+using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace FarmaDiDataAccess.Interfaces
@@ -12,5 +9,6 @@ namespace FarmaDiDataAccess.Interfaces
     {
         Task<RepositoryResponse<IEnumerable<Stock>>> GetAllAsync();
         Task<RepositoryResponse<Stock>> GetByIdAsync(int id);
+        Task<RepositoryResponse<(IEnumerable<Stock> Items, int TotalCount)>> GetStockPagedAsync(int pageNumber, int pageSize);
     }
 }

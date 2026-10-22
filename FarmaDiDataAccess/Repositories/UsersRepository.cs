@@ -1,4 +1,4 @@
-﻿using FarmaDiCore.Common;
+using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
 using FarmaDiDataAccess.Interfaces;
 using Microsoft.Data.SqlClient;
@@ -18,7 +18,7 @@ namespace FarmaDiDataAccess.Repositories
 
         public async Task<RepositoryResponse<RolesUers>> RegisterUserWithRolesAsync(Users user, IEnumerable<Roles> roleIds)
         {
-            var userWithRolesResult = new RolesUers(); // CORREGIDO: Variable semántica
+            var userWithRolesResult = new RolesUers(); // CORREGIDO: Variable sem�ntica
             try
             {
                 using (SqlConnection connection = new SqlConnection(_connectionString))
@@ -78,7 +78,7 @@ namespace FarmaDiDataAccess.Repositories
                     {
                         Data = userWithRolesResult,
                         OperationStatusCode = 0,
-                        Message = "Operación exitosa"
+                        Message = "Operaci�n exitosa"
                     };
                 }
             }
@@ -237,7 +237,7 @@ namespace FarmaDiDataAccess.Repositories
                     Message = ex.Message
                 };
             }
-            catch (Exception ex) // CORREGIDO: Bloque catch genérico ausente
+            catch (Exception ex) // CORREGIDO: Bloque catch gen�rico ausente
             {
                 return new RepositoryResponse<Users>
                 {
@@ -255,7 +255,7 @@ namespace FarmaDiDataAccess.Repositories
                 using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
                     await connection.OpenAsync();
-                    SqlCommand cmd = new SqlCommand("USP_UpdateUser", connection); // CORREGIDO: Semántica del SP de usuarios
+                    SqlCommand cmd = new SqlCommand("USP_UpdateUser", connection); // CORREGIDO: Sem�ntica del SP de usuarios
                     cmd.CommandType = CommandType.StoredProcedure;
                     cmd.Parameters.AddWithValue("@UserId", id);
                     cmd.Parameters.AddWithValue("@UserName", users.UserName);
@@ -296,7 +296,7 @@ namespace FarmaDiDataAccess.Repositories
                     Message = ex.Message
                 };
             }
-            catch (Exception ex) // CORREGIDO: Bloque catch genérico ausente
+            catch (Exception ex) // CORREGIDO: Bloque catch gen�rico ausente
             {
                 return new RepositoryResponse<Users>
                 {
@@ -353,7 +353,7 @@ namespace FarmaDiDataAccess.Repositories
                 response.Message = ex.Message;
                 return response;
             }
-            catch (Exception ex) // CORREGIDO: Bloque catch genérico unificado en la raíz del método
+            catch (Exception ex) // CORREGIDO: Bloque catch gen�rico unificado en la ra�z del m�todo
             {
                 response.Data = null;
                 response.OperationStatusCode = -1;
@@ -380,7 +380,7 @@ namespace FarmaDiDataAccess.Repositories
                     {
                         if (await reader.ReadAsync())
                         {
-                            userResult = new Users(); // CORREGIDO: Instanciación obligatoria para mitigar NullReferenceException
+                            userResult = new Users(); // CORREGIDO: Instanciaci�n obligatoria para mitigar NullReferenceException
                             userResult.UserId = (int)reader["UserId"];
                             userResult.UserName = reader["UserName"].ToString()!;
                             userResult.UserLastName = reader["UserLastName"].ToString()!;
@@ -404,7 +404,7 @@ namespace FarmaDiDataAccess.Repositories
                 response.Message = ex.Message;
                 return response;
             }
-            catch (Exception ex) // CORREGIDO: Añadido soporte global de fallos de infraestructura
+            catch (Exception ex) // CORREGIDO: A�adido soporte global de fallos de infraestructura
             {
                 response.Data = null;
                 response.OperationStatusCode = -1;
@@ -420,7 +420,7 @@ namespace FarmaDiDataAccess.Repositories
                 using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
                     await connection.OpenAsync();
-                    // CORREGIDO: Redirección al SP correcto de usuarios (Antes USP_UpdateBrandStatus)
+                    // CORREGIDO: Redirecci�n al SP correcto de usuarios (Antes USP_UpdateBrandStatus)
                     SqlCommand cmd = new SqlCommand("USP_UpdateUserStatus", connection);
                     cmd.CommandType = CommandType.StoredProcedure;
                     cmd.Parameters.AddWithValue("@UserId", id);
@@ -459,7 +459,7 @@ namespace FarmaDiDataAccess.Repositories
                     Message = ex.Message
                 };
             }
-            catch (Exception ex) // CORREGIDO: Bloque catch genérico ausente
+            catch (Exception ex) // CORREGIDO: Bloque catch gen�rico ausente
             {
                 return new RepositoryResponse<Users>
                 {
@@ -500,7 +500,7 @@ namespace FarmaDiDataAccess.Repositories
                 {
                     Data = updatedRoles,
                     OperationStatusCode = 0,
-                    Message = "Operación exitosa"
+                    Message = "Operaci�n exitosa"
                 };
             }
             catch (SqlException ex)
@@ -508,7 +508,7 @@ namespace FarmaDiDataAccess.Repositories
                 return new RepositoryResponse<IEnumerable<Roles>>
                 {
                     Data = null,
-                    OperationStatusCode = ex.Number, // CORREGIDO: Mapeo dinámico del código SQL nativo para capturar el error 50003
+                    OperationStatusCode = ex.Number, // CORREGIDO: Mapeo din�mico del c�digo SQL nativo para capturar el error 50003
                     Message = ex.Message
                 };
             }
@@ -517,6 +517,96 @@ namespace FarmaDiDataAccess.Repositories
                 return new RepositoryResponse<IEnumerable<Roles>>
                 {
                     Data = null,
+                    OperationStatusCode = -1,
+                    Message = ex.Message
+                };
+            }
+        }
+    
+        public async Task<RepositoryResponse<(IEnumerable<Users> Items, int TotalCount)>> GetUsersPagedAsync(int pageNumber, int pageSize)
+        {
+            var userList = new List<Users>();
+            var userDictionary = new Dictionary<int, Users>();
+            int totalCount = 0;
+
+            try
+            {
+                using (SqlConnection connection = new SqlConnection(_connectionString))
+                {
+                    await connection.OpenAsync();
+                    SqlCommand cmd = new SqlCommand("USP_GetUserPage", connection);
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@PageNumber", pageNumber);
+                    cmd.Parameters.AddWithValue("@PageSize", pageSize);
+
+                    var totalRecordsParam = new SqlParameter("@TotalRecords", SqlDbType.Int)
+                    {
+                        Direction = ParameterDirection.Output
+                    };
+                    cmd.Parameters.Add(totalRecordsParam);
+
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            var user = new Users
+                            {
+                                UserId = (int)reader["UserId"],
+                                UserName = reader["UserName"].ToString()!,
+                                UserLastName = reader["UserLastName"].ToString()!,
+                                Mail = reader["Mail"].ToString()!,
+                                UserPhone = reader["UserPhone"].ToString()!,
+                                IsActive = (bool)reader["Isactive"],
+                                Roles = new List<Roles>()
+                            };
+                            userList.Add(user);
+                            userDictionary[user.UserId] = user;
+                        }
+
+                        if (await reader.NextResultAsync())
+                        {
+                            while (await reader.ReadAsync())
+                            {
+                                var userIdOwner = (int)reader["UserId"];
+                                if (userDictionary.TryGetValue(userIdOwner, out var userOwner))
+                                {
+                                    userOwner.Roles.Add(new Roles
+                                    {
+                                        Id = (int)reader["RolId"],
+                                        RolName = reader["RolName"].ToString()!
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    if (totalRecordsParam.Value != DBNull.Value)
+                    {
+                        totalCount = Convert.ToInt32(totalRecordsParam.Value);
+                    }
+
+                    return new RepositoryResponse<(IEnumerable<Users> Items, int TotalCount)>
+                    {
+                        Data = (userList, totalCount),
+                        OperationStatusCode = 0,
+                        Message = "Operaci�n exitosa"
+                    };
+                }
+            }
+            catch (SqlException ex)
+            {
+                return new RepositoryResponse<(IEnumerable<Users> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Users>(), 0),
+                    OperationStatusCode = ex.Number,
+                    Message = ex.Message
+                };
+            }
+            catch (Exception ex)
+            {
+                return new RepositoryResponse<(IEnumerable<Users> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Users>(), 0),
                     OperationStatusCode = -1,
                     Message = ex.Message
                 };

@@ -1,4 +1,4 @@
-﻿using FarmaDiBusiness.DTOs.RolsDto;
+using FarmaDiBusiness.DTOs.RolsDto;
 using FarmaDiBusiness.DTOs.UsersDto;
 using FarmaDiBusiness.Interfaces;
 using FarmaDiCore.Common;
@@ -345,6 +345,58 @@ namespace FarmaDiBusiness.Services
                     IsSuccess = false,
                     MessageCode = MessageCodes.ErrorDataBase,
                     Message = "Ocurrió un error inesperado al procesar la solicitud de asignación."
+                };
+            }
+        }
+    
+        public async Task<ServiceResponse<(IEnumerable<GetUsers> Items, int TotalCount)>> GetUsersPagedAsync(int page, int limit)
+        {
+            try
+            {
+                var repositoryResult = await _userRepository.GetUsersPagedAsync(page, limit);
+
+                if (repositoryResult.OperationStatusCode != 0 || repositoryResult.Data.Items == null)
+                {
+                    return new ServiceResponse<(IEnumerable<GetUsers> Items, int TotalCount)>
+                    {
+                        Data = (Enumerable.Empty<GetUsers>(), 0),
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.ErrorDataBase,
+                        Message = repositoryResult.Message ?? "Error al obtener usuarios paginados."
+                    };
+                }
+
+                var usersDto = repositoryResult.Data.Items.Select(user => new GetUsers
+                {
+                    Id = user.UserId,
+                    UserName = user.UserName,
+                    UserLastName = user.UserLastName,
+                    Mail = user.Mail,
+                    UserPhone = user.UserPhone,
+                    IsActive = user.IsActive,
+                    Roles = user.Roles.Select(rol => new RolesResponseDto
+                    {
+                        RolId = rol.Id,
+                        RolName = rol.RolName
+                    }).ToList()
+                }).ToList();
+
+                return new ServiceResponse<(IEnumerable<GetUsers> Items, int TotalCount)>
+                {
+                    Data = (usersDto, repositoryResult.Data.TotalCount),
+                    IsSuccess = true,
+                    MessageCode = MessageCodes.Success,
+                    Message = "Operación exitosa"
+                };
+            }
+            catch (Exception)
+            {
+                return new ServiceResponse<(IEnumerable<GetUsers> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<GetUsers>(), 0),
+                    IsSuccess = false,
+                    MessageCode = MessageCodes.ErrorDataBase,
+                    Message = "Ocurrió un error inesperado al paginar usuarios."
                 };
             }
         }

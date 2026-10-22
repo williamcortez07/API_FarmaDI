@@ -1,16 +1,11 @@
-﻿using FarmaDiBusiness.DTOs;
+using FarmaDiBusiness.DTOs;
 using FarmaDiBusiness.Interfaces;
-using FarmaDiCore.Common;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
 
 namespace FarmaDiApi.Controllers
 {
     [Route("api/[controller]")]
-    [ApiController]
-   // [Authorize]
-    public class CategoriesController : ControllerBase
+    public class CategoriesController : BaseApiController
     {
         private readonly ICategoriesService _categoryService;
 
@@ -22,13 +17,18 @@ namespace FarmaDiApi.Controllers
         [HttpPost]
         public async Task<IActionResult> Add([FromBody] AddCategoryDto addCategoryDto)
         {
+            if (addCategoryDto == null)
+            {
+                return BadRequestError("El cuerpo de la solicitud no puede estar vacío.");
+            }
+
             var serviceResponse = await _categoryService.AddAsync(addCategoryDto);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var categoryDto = new CategoryDto
                 {
-                    CategoryId = serviceResponse.Data!.CategoryId,
+                    CategoryId = serviceResponse.Data.CategoryId,
                     CategoryName = serviceResponse.Data.CategoryName,
                     Description = serviceResponse.Data.CategoryDescription,
                     IsActive = serviceResponse.Data.IsActive,
@@ -40,22 +40,9 @@ namespace FarmaDiApi.Controllers
                     categoryDto);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.Conflict:
-                    unsuccessfulResponse.Code = "409";
-                    unsuccessfulResponse.Message = "El nombre de la categoría ya existe";
-                    unsuccessfulResponse.Details = new { info = "No se puede duplicar el nombre de la categoría" };
-                    return Conflict(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    // CORREGIDO: Antes retornaba BadRequest (400) con código interno 500
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customConflictMessage: "El nombre de la categoría ya existe");
         }
 
         [HttpGet]
@@ -63,66 +50,37 @@ namespace FarmaDiApi.Controllers
         {
             var serviceResponse = await _categoryService.GetAllAsync();
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                var dtoCollection = serviceResponse.Data!.Select(c => new GetAllCategoriesDto
+                var dtoCollection = serviceResponse.Data.Select(c => new GetAllCategoriesDto
                 {
                     Id = c.CategoryId,
                     Name = c.CategoryName,
                     Description = c.CategoryDescription,
                     IsActive = c.IsActive
-                }).ToList();
+                });
 
-                var apiResponse = new ApiResponse<IEnumerable<GetAllCategoriesDto>>
-                {
-                    Data = dtoCollection,
-                    Meta = new
-                    {
-                        TotalAmount = dtoCollection.Count,
-                        message = serviceResponse.Message
-                    }
-                };
-                return Ok(apiResponse);
+                return Ok(BuildCollectionResponse(dtoCollection, serviceResponse.Message));
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NoData:
-                    unsuccessfulResponse.Code = "200";
-                    unsuccessfulResponse.Message = "No se encontraron registros";
-                    unsuccessfulResponse.Details = new { info = "Temporalmente no hay registros en la BD" };
-                    return Ok(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = "Error interno en la aplicación" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(serviceResponse);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            if (id <= 0)
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
             {
-                var response = new UnsuccessfulResponseDto
-                {
-                    Code = "400",
-                    Message = "Id proporcionado debe de ser mayor a 0",
-                    Details = new { info = "Error en el formato de valor enviado" }
-                };
-                return BadRequest(response);
+                return validationError!;
             }
 
             var serviceResponse = await _categoryService.GetByIdAsync(id);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var categoryDto = new CategoryDto
                 {
-                    CategoryId = serviceResponse.Data!.CategoryId,
+                    CategoryId = serviceResponse.Data.CategoryId,
                     CategoryName = serviceResponse.Data.CategoryName,
                     Description = serviceResponse.Data.CategoryDescription,
                     IsActive = serviceResponse.Data.IsActive,
@@ -131,33 +89,31 @@ namespace FarmaDiApi.Controllers
                 return Ok(categoryDto);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró una categoría asociada al Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "No se encontró el recurso solicitado" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno no esperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró una categoría asociada al Id proporcionado");
         }
 
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, [FromBody] UpdateCategoryDto category)
         {
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
+            {
+                return validationError!;
+            }
+
+            if (category == null)
+            {
+                return BadRequestError("El cuerpo de la solicitud no puede estar vacío.");
+            }
+
             var serviceResponse = await _categoryService.UpdateAsync(id, category);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var updated = new CategoryDto
                 {
-                    CategoryId = serviceResponse.Data!.CategoryId,
+                    CategoryId = serviceResponse.Data.CategoryId,
                     CategoryName = serviceResponse.Data.CategoryName,
                     Description = serviceResponse.Data.CategoryDescription,
                     IsActive = serviceResponse.Data.IsActive,
@@ -166,49 +122,28 @@ namespace FarmaDiApi.Controllers
                 return Ok(updated);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró una categoría con el Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Recurso no encontrado" };
-                    return NotFound(unsuccessfulResponse);
-
-                case MessageCodes.Conflict:
-                    unsuccessfulResponse.Code = "409";
-                    unsuccessfulResponse.Message = "El registro no pudo guardarse por un conflicto";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Hubo conflicto en la actualización" };
-                    return Conflict(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró una categoría con el Id proporcionado");
         }
 
         [HttpGet("byname/{name}")]
         public async Task<IActionResult> GetByName(string name)
         {
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-
-            if (name.IsNullOrEmpty())
+            if (string.IsNullOrWhiteSpace(name))
             {
-                unsuccessfulResponse.Code = "400";
-                unsuccessfulResponse.Message = "El dato proporcionado no es válido";
-                unsuccessfulResponse.Details = new { Error = "El nombre no puede ser nulo o vacío" };
-                return BadRequest(unsuccessfulResponse);
+                return BadRequestError(
+                    "El dato proporcionado no es válido",
+                    new { Error = "El nombre no puede ser nulo o vacío" });
             }
 
             var serviceResponse = await _categoryService.GetByNameAsync(name);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var categoryDto = new CategoryDto
                 {
-                    CategoryId = serviceResponse.Data!.CategoryId,
+                    CategoryId = serviceResponse.Data.CategoryId,
                     CategoryName = serviceResponse.Data.CategoryName,
                     Description = serviceResponse.Data.CategoryDescription,
                     IsActive = serviceResponse.Data.IsActive,
@@ -217,64 +152,45 @@ namespace FarmaDiApi.Controllers
                 return Ok(categoryDto);
             }
 
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = serviceResponse.Message ?? "Categoría no encontrada";
-                    unsuccessfulResponse.Details = new { Error = "El recurso solicitado no está disponible en el servidor" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = serviceResponse.Message ?? "Ocurrió un error inesperado";
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "Categoría no encontrada");
         }
 
         [HttpPatch("{id}/state")]
         public async Task<IActionResult> SetState(int id, [FromQuery] bool state)
         {
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
+            {
+                return validationError!;
+            }
+
             var serviceResponse = await _categoryService.SetStateAsync(id, state);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 return Ok(new
                 {
-                    CategoryId = serviceResponse.Data!.CategoryId,
+                    CategoryId = serviceResponse.Data.CategoryId,
                     CategoryName = serviceResponse.Data.CategoryName,
                     IsActive = serviceResponse.Data.IsActive,
                     Message = serviceResponse.Message
                 });
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró categoría con el Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Recurso no encontrado" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró categoría con el Id proporcionado");
         }
 
         [HttpGet("paged")]
         public async Task<IActionResult> GetPaged([FromQuery] int page = 1, [FromQuery] int limit = 10)
         {
-            if (page <= 0) page = 1;
-            if (limit <= 0) limit = 10;
-            if (limit > 100) limit = 100;
+            NormalizePagination(ref page, ref limit);
 
             var serviceResponse = await _categoryService.GetCategoriesPaged(page, limit);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data.Item1 != null)
             {
                 var (categories, totalCount) = serviceResponse.Data;
                 var categoriesCollection = categories.Select(c => new GetAllCategoriesDto
@@ -283,40 +199,12 @@ namespace FarmaDiApi.Controllers
                     Name = c.CategoryName,
                     Description = c.CategoryDescription,
                     IsActive = c.IsActive,
-                }).ToList();
+                });
 
-                int totalPages = (int)Math.Ceiling(totalCount / (double)limit);
-
-                var apiResponse = new ApiResponse<IEnumerable<GetAllCategoriesDto>>
-                {
-                    Data = categoriesCollection,
-                    Meta = new GetPagedDto
-                    {
-                        TotalItems = totalCount,
-                        TotalPages = totalPages,
-                        CurrentPage = page,
-                        ItemsPerPage = limit
-                    }
-                };
-                return Ok(apiResponse);
+                return Ok(BuildPagedResponse(categoriesCollection, totalCount, page, limit));
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                case MessageCodes.NoData:
-                    unsuccessfulResponse.Code = "200";
-                    unsuccessfulResponse.Message = "No se encontraron registros";
-                    unsuccessfulResponse.Details = new { info = "Temporalmente no hay registros en la BD" };
-                    return Ok(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = "Error interno en la aplicación" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(serviceResponse);
         }
     }
 }

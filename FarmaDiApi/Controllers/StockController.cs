@@ -1,99 +1,83 @@
-﻿using FarmaDiBusiness.DTOs;
 using FarmaDiBusiness.DTOs.StockDto;
 using FarmaDiBusiness.Interfaces;
-using FarmaDiBusiness.Services;
-using FarmaDiCore.Common;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiApi.Controllers
 {
     [Route("api/[controller]")]
-    [ApiController]
-    public class StockController : ControllerBase
+    public class StockController : BaseApiController
     {
-        private readonly IStockService _Service;
+        private readonly IStockService _stockService;
 
-        //Constructor del controlador
-        public StockController(IStockService stock)
+        public StockController(IStockService stockService)
         {
-            _Service = stock;
+            _stockService = stockService;
         }
-
 
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
-            var serviceResponse = await _Service.GetAllAsync();
+            var serviceResponse = await _stockService.GetAllAsync();
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                var stockDtoCollection = serviceResponse.Data!.Select(c => new StockDto
+                var stockDtoCollection = serviceResponse.Data.Select(c => new StockDto
                 {
                     StockId = c.Id,
                     BachtId = c.BatchId.Id,
                     BatchNumber = c.BatchId.BatchNumer,
                     ProductId = c.ProductId,
                     AvailableQuantity = c.AvailableQuantity,
-                   
                 });
 
-                //preparamos la respuesta ApiResponse
-                var apiResponse = new ApiResponse<IEnumerable<StockDto>>
-                {
-                    Data = stockDtoCollection,
-                    Meta = new
-                    {
-                        TotalAmount = stockDtoCollection.Count(),
-                        message = serviceResponse.Message
-
-                    }
-                };
-                return Ok(apiResponse);
+                return Ok(BuildCollectionResponse(stockDtoCollection, serviceResponse.Message));
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NoData:
-                    unsuccessfulResponse.Code = "200";
-                    unsuccessfulResponse.Message = "No se encontraron registros";
-                    unsuccessfulResponse.Details = new { info = "Temporalmente no hay registros en la BD" };
-
-                    return Ok(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = "Error interno en la aplicación" };
-
-                    return StatusCode(500, unsuccessfulResponse);
-            }
-
+            return MapServiceError(serviceResponse);
         }
 
+        [HttpGet("paged")]
+        public async Task<IActionResult> GetPaged([FromQuery] int page = 1, [FromQuery] int limit = 10)
+        {
+            NormalizePagination(ref page, ref limit);
+
+            var serviceResponse = await _stockService.GetStockPagedAsync(page, limit);
+
+            if (serviceResponse.IsSuccess && serviceResponse.Data.Items != null)
+            {
+                var (items, totalCount) = serviceResponse.Data;
+                var stockDtoCollection = items.Select(c => new StockDto
+                {
+                    StockId = c.Id,
+                    BachtId = c.BatchId.Id,
+                    BatchNumber = c.BatchId.BatchNumer,
+                    ProductId = c.ProductId,
+                    AvailableQuantity = c.AvailableQuantity,
+                });
+
+                return Ok(BuildPagedResponse(stockDtoCollection, totalCount, page, limit));
+            }
+
+            return MapServiceError(serviceResponse);
+        }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            if (id <= 0 || id == null)
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
             {
-                var response = new UnsuccessfulResponseDto()
-                {
-                    Code = "400",
-                    Message = "Id proporcionado debe de ser mayor a 0",
-                    Details = new { info = "Error en el formato de valor enviado" }
-                };
-                return BadRequest(response);
+                return validationError!;
             }
-            var serviceResponse = await _Service.GetByIdAsync(id);
 
-            if (serviceResponse.IsSuccess)
+            var serviceResponse = await _stockService.GetByIdAsync(id);
+
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var stockDto = new StockDto
                 {
-                    StockId = serviceResponse.Data!.Id,
+                    StockId = serviceResponse.Data.Id,
                     BachtId = serviceResponse.Data.BatchId.Id,
                     BatchNumber = serviceResponse.Data.BatchId.BatchNumer,
                     ProductId = serviceResponse.Data.ProductId,
@@ -102,31 +86,10 @@ namespace FarmaDiApi.Controllers
 
                 return Ok(stockDto);
             }
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    var unsuccessfulResponse = new UnsuccessfulResponseDto()
-                    {
-                        Code = "404",
-                        Message = "No se encontró ningún registro asociado al Id proporcionado",
-                        Details = new { info = serviceResponse.Message ?? "No se encontró el recurso solicitado" }
-                    };
 
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse = new UnsuccessfulResponseDto()
-                    {
-                        Code = "500",
-                        Message = "Ocurrió un error",
-                        Details = new { info = serviceResponse.Message ?? "Error interno no esperado" }
-                    };
-
-                    return StatusCode(500, unsuccessfulResponse);
-
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró ningún registro asociado al Id proporcionado");
         }
-
-
     }
 }

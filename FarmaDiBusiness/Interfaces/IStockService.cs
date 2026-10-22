@@ -1,9 +1,6 @@
-﻿using FarmaDiCore.Common;
+using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace FarmaDiBusiness.Interfaces
@@ -12,5 +9,6 @@ namespace FarmaDiBusiness.Interfaces
     {
         Task<ServiceResponse<IEnumerable<Stock>>> GetAllAsync();
         Task<ServiceResponse<Stock>> GetByIdAsync(int id);
+        Task<ServiceResponse<(IEnumerable<Stock> Items, int TotalCount)>> GetStockPagedAsync(int page, int limit);
     }
 }

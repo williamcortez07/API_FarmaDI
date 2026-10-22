@@ -1,9 +1,13 @@
-﻿using FarmaDiCore.Common;
+using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
 using FarmaDiDataAccess.Interfaces;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
+using System;
+using System.Collections.Generic;
 using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiDataAccess.Repositories
 {
@@ -74,7 +78,7 @@ namespace FarmaDiDataAccess.Repositories
 
         public async Task<RepositoryResponse<IEnumerable<Presentations>>> GetAllAsync()
         {
-            var presentationList = new List<Presentations>(); // CORREGIDO: Antes se llamaba 'category'
+            var presentationList = new List<Presentations>();
             var response = new RepositoryResponse<IEnumerable<Presentations>>();
             try
             {
@@ -245,10 +249,9 @@ namespace FarmaDiDataAccess.Repositories
                 using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
                     await connection.OpenAsync();
-                    // CORREGIDO: Apunta al SP de presentaciones, no de categorías
                     SqlCommand cmd = new SqlCommand("USP_GetPresentationByName", connection);
                     cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.Parameters.AddWithValue("@PresentationDescription", name); // CORREGIDO: Parámetro correcto
+                    cmd.Parameters.AddWithValue("@PresentationDescription", name);
                     cmd.Parameters.Add("@ReturnValue", SqlDbType.Int).Direction = ParameterDirection.ReturnValue;
 
                     using (var reader = await cmd.ExecuteReaderAsync())
@@ -334,6 +337,74 @@ namespace FarmaDiDataAccess.Repositories
                 return new RepositoryResponse<Presentations>
                 {
                     Data = null,
+                    OperationStatusCode = -1,
+                    Message = ex.Message
+                };
+            }
+        }
+
+        public async Task<RepositoryResponse<(IEnumerable<Presentations> Items, int TotalCount)>> GetPresentationsPagedAsync(int pageNumber, int pageSize)
+        {
+            var presentationList = new List<Presentations>();
+            int totalCount = 0;
+            try
+            {
+                using (SqlConnection connection = new SqlConnection(_connectionString))
+                {
+                    await connection.OpenAsync();
+                    SqlCommand cmd = new SqlCommand("USP_GetPresentationPage", connection);
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@PageNumber", pageNumber);
+                    cmd.Parameters.AddWithValue("@PageSize", pageSize);
+
+                    var totalRecordsParam = new SqlParameter("@TotalRecords", SqlDbType.Int)
+                    {
+                        Direction = ParameterDirection.Output
+                    };
+                    cmd.Parameters.Add(totalRecordsParam);
+
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            presentationList.Add(new Presentations
+                            {
+                                Id = (int)reader["PresentationId"],
+                                Description = reader["PresentationDescription"].ToString()!,
+                                Quantity = reader["quantity"].ToString()!,
+                                UnitMeasure = reader["UnitMeasure"].ToString()!,
+                                IsActive = (bool)reader["Isactive"]
+                            });
+                        }
+                    }
+
+                    if (totalRecordsParam.Value != DBNull.Value)
+                    {
+                        totalCount = Convert.ToInt32(totalRecordsParam.Value);
+                    }
+
+                    return new RepositoryResponse<(IEnumerable<Presentations> Items, int TotalCount)>
+                    {
+                        Data = (presentationList, totalCount),
+                        OperationStatusCode = 0,
+                        Message = "Operación exitosa"
+                    };
+                }
+            }
+            catch (SqlException ex)
+            {
+                return new RepositoryResponse<(IEnumerable<Presentations> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Presentations>(), 0),
+                    OperationStatusCode = ex.Number,
+                    Message = ex.Message
+                };
+            }
+            catch (Exception ex)
+            {
+                return new RepositoryResponse<(IEnumerable<Presentations> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Presentations>(), 0),
                     OperationStatusCode = -1,
                     Message = ex.Message
                 };

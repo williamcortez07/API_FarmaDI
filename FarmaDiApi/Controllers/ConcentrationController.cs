@@ -1,70 +1,64 @@
-﻿using FarmaDiBusiness.DTOs;
-using FarmaDiBusiness.DTOs.ProductDto;
+using FarmaDiBusiness.DTOs;
 using FarmaDiBusiness.Interfaces;
-using FarmaDiCore.Common;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiApi.Controllers
 {
     [Route("api/[controller]")]
-    [ApiController]
-    //[Authorize]
-    public class concentrationsController : ControllerBase
+    public class ConcentrationController : BaseApiController
     {
         private readonly IConcentrationServices _concentrationsService;
 
-        public concentrationsController(IConcentrationServices concentrationsService)
+        public ConcentrationController(IConcentrationServices concentrationsService)
         {
             _concentrationsService = concentrationsService;
         }
 
-       
         [HttpGet]
         public async Task<IActionResult> GetAll()
         {
             var serviceResponse = await _concentrationsService.GetAllAsync();
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                var concentrationsDtoCollection = serviceResponse.Data!.Select(b => new ConcentrationDto
+                var concentrationsDtoCollection = serviceResponse.Data.Select(b => new ConcentrationDto
                 {
                     ConcentrationId = b.ConcentrationId,
                     Volume = b.Volume,
                     porcentage = b.porcentage,
                     IsActive = b.IsActive
-                }).ToList();
+                });
 
-                var apiResponse = new ApiResponse<IEnumerable<ConcentrationDto>>
-                {
-                    Data = concentrationsDtoCollection,
-                    Meta = new
-                    {
-                        TotalAmount = concentrationsDtoCollection.Count,
-                        message = serviceResponse.Message
-                    }
-                };
-                return Ok(apiResponse);
+                return Ok(BuildCollectionResponse(concentrationsDtoCollection, serviceResponse.Message));
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NoData:
-                    unsuccessfulResponse.Code = "200";
-                    unsuccessfulResponse.Message = "No se encontraron registros";
-                    unsuccessfulResponse.Details = new { info = "Temporalmente no hay registros en la BD" };
-                    return Ok(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = "Error interno en la aplicación" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(serviceResponse);
         }
 
-       
+        [HttpGet("paged")]
+        public async Task<IActionResult> GetPaged([FromQuery] int page = 1, [FromQuery] int limit = 10)
+        {
+            NormalizePagination(ref page, ref limit);
+
+            var serviceResponse = await _concentrationsService.GetConcentrationsPagedAsync(page, limit);
+
+            if (serviceResponse.IsSuccess && serviceResponse.Data.Items != null)
+            {
+                var (items, totalCount) = serviceResponse.Data;
+                var dtos = items.Select(b => new ConcentrationDto
+                {
+                    ConcentrationId = b.ConcentrationId,
+                    Volume = b.Volume,
+                    porcentage = b.porcentage,
+                    IsActive = b.IsActive
+                });
+
+                return Ok(BuildPagedResponse(dtos, totalCount, page, limit));
+            }
+
+            return MapServiceError(serviceResponse);
+        }
     }
 }

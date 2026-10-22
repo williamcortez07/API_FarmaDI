@@ -1,16 +1,13 @@
-﻿using FarmaDiBusiness.DTOs;
+using FarmaDiBusiness.DTOs;
 using FarmaDiBusiness.Interfaces;
-using FarmaDiCore.Common;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiApi.Controllers
 {
     [Route("api/[controller]")]
-    [ApiController]
-  //  [Authorize]
-    public class PresentationController : ControllerBase
+    public class PresentationController : BaseApiController
     {
         private readonly IPresentationService _presentationService;
 
@@ -22,13 +19,18 @@ namespace FarmaDiApi.Controllers
         [HttpPost]
         public async Task<IActionResult> Add([FromBody] AddPresentationDto addPresentationDto)
         {
+            if (addPresentationDto == null)
+            {
+                return BadRequestError("El cuerpo de la solicitud no puede estar vacío.");
+            }
+
             var serviceResponse = await _presentationService.AddAsync(addPresentationDto);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var presentationDto = new PresentationDto
                 {
-                    Id = serviceResponse.Data!.Id,
+                    Id = serviceResponse.Data.Id,
                     Description = serviceResponse.Data.Description,
                     Quantity = serviceResponse.Data.Quantity,
                     UnitMeasure = serviceResponse.Data.UnitMeasure,
@@ -40,23 +42,9 @@ namespace FarmaDiApi.Controllers
                     presentationDto);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.Conflict:
-                case MessageCodes.ErrorValidation: // CORREGIDO: Soporta ambos enums mapeando el HTTP 409 legítimo
-                    unsuccessfulResponse.Code = "409";
-                    unsuccessfulResponse.Message = "El nombre de la presentación ya existe";
-                    unsuccessfulResponse.Details = new { info = "No se puede duplicar el nombre de una presentación" };
-                    return Conflict(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    // CORREGIDO: Antes retornaba Conflict(409) ante un error 500
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customConflictMessage: "El nombre de la presentación ya existe");
         }
 
         [HttpGet]
@@ -64,67 +52,63 @@ namespace FarmaDiApi.Controllers
         {
             var serviceResponse = await _presentationService.GetAllAsync();
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                var presentationDtoCollection = serviceResponse.Data!.Select(p => new GetAllPresentationDto
+                var presentationDtoCollection = serviceResponse.Data.Select(p => new GetAllPresentationDto
                 {
                     Id = p.Id,
                     Description = p.Description,
                     Quantity = p.Quantity,
                     UnitMeasure = p.UnitMeasure,
                     IsActive = p.IsActive
-                }).ToList(); // CORREGIDO: .ToList() evita doble enumeración en memoria
+                });
 
-                var apiResponse = new ApiResponse<IEnumerable<GetAllPresentationDto>>
-                {
-                    Data = presentationDtoCollection,
-                    Meta = new
-                    {
-                        TotalAmount = presentationDtoCollection.Count,
-                        message = serviceResponse.Message
-                    }
-                };
-                return Ok(apiResponse);
+                return Ok(BuildCollectionResponse(presentationDtoCollection, serviceResponse.Message));
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
+            return MapServiceError(serviceResponse);
+        }
+
+        [HttpGet("paged")]
+        public async Task<IActionResult> GetPaged([FromQuery] int page = 1, [FromQuery] int limit = 10)
+        {
+            NormalizePagination(ref page, ref limit);
+
+            var serviceResponse = await _presentationService.GetPresentationsPagedAsync(page, limit);
+
+            if (serviceResponse.IsSuccess && serviceResponse.Data.Items != null)
             {
-                case MessageCodes.NoData:
-                    unsuccessfulResponse.Code = "200";
-                    unsuccessfulResponse.Message = "No se encontraron registros";
-                    unsuccessfulResponse.Details = new { info = "Temporalmente no hay registros en la BD" };
-                    return Ok(unsuccessfulResponse);
+                var (presentations, totalCount) = serviceResponse.Data;
+                var presentationDtoCollection = presentations.Select(p => new GetAllPresentationDto
+                {
+                    Id = p.Id,
+                    Description = p.Description,
+                    Quantity = p.Quantity,
+                    UnitMeasure = p.UnitMeasure,
+                    IsActive = p.IsActive
+                });
 
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = "Error interno en la aplicación" };
-                    return StatusCode(500, unsuccessfulResponse);
+                return Ok(BuildPagedResponse(presentationDtoCollection, totalCount, page, limit));
             }
+
+            return MapServiceError(serviceResponse);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            if (id <= 0) // CORREGIDO: Eliminado 'id == null' por incompatibilidad con tipo int primitivo
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
             {
-                var response = new UnsuccessfulResponseDto
-                {
-                    Code = "400",
-                    Message = "Id proporcionado debe de ser mayor a 0",
-                    Details = new { info = "Error en el formato de valor enviado" }
-                };
-                return BadRequest(response);
+                return validationError!;
             }
 
             var serviceResponse = await _presentationService.GetByIdAsync(id);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var presentationDto = new PresentationDto
                 {
-                    Id = serviceResponse.Data!.Id,
+                    Id = serviceResponse.Data.Id,
                     Description = serviceResponse.Data.Description,
                     Quantity = serviceResponse.Data.Quantity,
                     UnitMeasure = serviceResponse.Data.UnitMeasure,
@@ -133,34 +117,31 @@ namespace FarmaDiApi.Controllers
                 return Ok(presentationDto);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró una presentación asociada al Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "No se encontró el recurso solicitado" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno no esperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró una presentación asociada al Id proporcionado");
         }
 
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, [FromBody] UpdatePresentationDto data)
         {
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
+            {
+                return validationError!;
+            }
+
+            if (data == null)
+            {
+                return BadRequestError("El cuerpo de la solicitud no puede estar vacío.");
+            }
+
             var serviceResponse = await _presentationService.UpdateAsync(id, data);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                // CORREGIDO: Comentario basura de "categorías" removido
                 var updatedPresentation = new PresentationDto
                 {
-                    Id = serviceResponse.Data!.Id,
+                    Id = serviceResponse.Data.Id,
                     Description = serviceResponse.Data.Description,
                     Quantity = serviceResponse.Data.Quantity,
                     UnitMeasure = serviceResponse.Data.UnitMeasure,
@@ -170,49 +151,28 @@ namespace FarmaDiApi.Controllers
                 return Ok(updatedPresentation);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.ErrorValidation:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró presentación con el Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Recurso no encontrado" };
-                    // CORREGIDO: Mapeo de HTTP semántico (404 NotFound en vez de StatusCode 400)
-                    return NotFound(unsuccessfulResponse);
-
-                case MessageCodes.Conflict:
-                    unsuccessfulResponse.Code = "409";
-                    unsuccessfulResponse.Message = "El registro no pudo guardarse por un conflicto";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Hubo conflicto en la actualización" };
-                    return Conflict(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró presentación con el Id proporcionado");
         }
 
         [HttpGet("byname/{name}")]
         public async Task<IActionResult> GetByName(string name)
         {
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            if (name.IsNullOrEmpty())
+            if (string.IsNullOrWhiteSpace(name))
             {
-                unsuccessfulResponse.Code = "400";
-                unsuccessfulResponse.Message = "El dato proporcionado no es válido";
-                unsuccessfulResponse.Details = new { Error = "El nombre no puede ser nulo o vacío" };
-                return BadRequest(unsuccessfulResponse);
+                return BadRequestError(
+                    "El dato proporcionado no es válido",
+                    new { Error = "El nombre no puede ser nulo o vacío" });
             }
 
             var serviceResponse = await _presentationService.GetByNameAsync(name);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var presentationDto = new PresentationDto
                 {
-                    Id = serviceResponse.Data!.Id,
+                    Id = serviceResponse.Data.Id,
                     Description = serviceResponse.Data.Description,
                     Quantity = serviceResponse.Data.Quantity,
                     UnitMeasure = serviceResponse.Data.UnitMeasure,
@@ -221,31 +181,26 @@ namespace FarmaDiApi.Controllers
                 return Ok(presentationDto);
             }
 
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = serviceResponse.Message ?? "Presentación no encontrada";
-                    unsuccessfulResponse.Details = new { Error = "El recurso solicitado no está disponible en el servidor" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = serviceResponse.Message ?? "Ocurrió un error inesperado";
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "Presentación no encontrada");
         }
 
         [HttpPatch("{id}/state")]
         public async Task<IActionResult> SetState(int id, [FromQuery] bool state)
         {
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
+            {
+                return validationError!;
+            }
+
             var serviceResponse = await _presentationService.SetStateAsync(id, state);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 return Ok(new
                 {
-                    Id = serviceResponse.Data!.Id,
+                    Id = serviceResponse.Data.Id,
                     Description = serviceResponse.Data.Description,
                     Quantity = serviceResponse.Data.Quantity,
                     UnitMeasure = serviceResponse.Data.UnitMeasure,
@@ -254,29 +209,9 @@ namespace FarmaDiApi.Controllers
                 });
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.ErrorValidation:
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró presentación con el Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Recurso no encontrado" };
-                    // CORREGIDO: Retorna NotFound semántico en lugar de forzar StatusCode 400
-                    return NotFound(unsuccessfulResponse);
-
-                case MessageCodes.Conflict:
-                    unsuccessfulResponse.Code = "409";
-                    unsuccessfulResponse.Message = "El registro no pudo guardarse por un conflicto";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Hubo conflicto en la actualización" };
-                    return Conflict(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró presentación con el Id proporcionado");
         }
     }
 }

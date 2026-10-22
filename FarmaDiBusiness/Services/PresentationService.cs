@@ -1,9 +1,13 @@
-﻿using FarmaDiBusiness.DTOs;
+using FarmaDiBusiness.DTOs;
 using FarmaDiBusiness.Interfaces;
 using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
 using FarmaDiDataAccess.Interfaces;
 using Microsoft.IdentityModel.Tokens;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiBusiness.Services
 {
@@ -20,7 +24,6 @@ namespace FarmaDiBusiness.Services
         {
             try
             {
-                // Validar de forma segura si la presentación ya existe
                 var existing = await _presentationRepository.GetByNameAsync(newPresentation.Description);
 
                 if (existing?.Data != null && existing.Data.Id != 0 && !existing.Data.Description.IsNullOrEmpty())
@@ -29,7 +32,7 @@ namespace FarmaDiBusiness.Services
                     {
                         Data = null,
                         IsSuccess = false,
-                        MessageCode = MessageCodes.Conflict, // CORREGIDO: Antes ErrorValidation
+                        MessageCode = MessageCodes.Conflict,
                         Message = "Existe un registro con el nombre proporcionado"
                     };
                 }
@@ -68,7 +71,6 @@ namespace FarmaDiBusiness.Services
         {
             try
             {
-                // CORREGIDO: Envoltorio try-catch implementado para robustecer la infraestructura
                 var result = await _presentationRepository.GetAllAsync();
 
                 if (result.OperationStatusCode == 0)
@@ -98,7 +100,7 @@ namespace FarmaDiBusiness.Services
                         {
                             Data = null,
                             IsSuccess = false,
-                            MessageCode = MessageCodes.ErrorDataBase, // CORREGIDO: Mapeo semántico correcto en default
+                            MessageCode = MessageCodes.ErrorDataBase,
                             Message = "Ocurrió un error inesperado"
                         };
                 }
@@ -119,7 +121,6 @@ namespace FarmaDiBusiness.Services
         {
             try
             {
-                // CORREGIDO: Movido de forma segura adentro del try-catch
                 var result = await _presentationRepository.GetByIdAsync(id);
 
                 if (result.OperationStatusCode == 0)
@@ -208,7 +209,7 @@ namespace FarmaDiBusiness.Services
                     Data = result.Data,
                     IsSuccess = true,
                     MessageCode = MessageCodes.Success,
-                    Message = "Presentación actualizada correctamente" // CORREGIDO: Antes decía Marca
+                    Message = "Presentación actualizada correctamente"
                 };
             }
             catch (Exception)
@@ -244,15 +245,15 @@ namespace FarmaDiBusiness.Services
 
                 switch (result.OperationStatusCode)
                 {
-                    case 5038: // Mantiene soporte por si existe un SP mapeado con este código
-                    case 50009: // Homologado con el estándar global de tu sistema
+                    case 5038:
+                    case 50009:
                         messageCode = MessageCodes.NotFound;
                         message = "No se encontró una presentación que corresponda al nombre proporcionado";
                         break;
 
                     default:
                         messageCode = MessageCodes.ErrorDataBase;
-                        message = "Error en la base de datos al obtener la presentación."; // CORREGIDO: Antes decía marca
+                        message = "Error en la base de datos al obtener la presentación.";
                         break;
                 }
 
@@ -282,7 +283,6 @@ namespace FarmaDiBusiness.Services
             {
                 var response = new ServiceResponse<Presentations>();
 
-                // CORREGIDO: Validación de existencia real adaptada a la respuesta del repositorio
                 var existing = await _presentationRepository.GetByIdAsync(id);
                 if (existing?.Data == null || existing.Data.Id == 0)
                 {
@@ -319,6 +319,43 @@ namespace FarmaDiBusiness.Services
                     IsSuccess = false,
                     MessageCode = MessageCodes.ErrorDataBase,
                     Message = "Ocurrió un error inesperado al modificar el estado de la presentación"
+                };
+            }
+        }
+
+        public async Task<ServiceResponse<(IEnumerable<Presentations> Items, int TotalCount)>> GetPresentationsPagedAsync(int page, int limit)
+        {
+            try
+            {
+                var result = await _presentationRepository.GetPresentationsPagedAsync(page, limit);
+
+                if (result.OperationStatusCode == 0)
+                {
+                    return new ServiceResponse<(IEnumerable<Presentations> Items, int TotalCount)>
+                    {
+                        Data = result.Data,
+                        IsSuccess = true,
+                        MessageCode = MessageCodes.Success,
+                        Message = "Operación exitosa"
+                    };
+                }
+
+                return new ServiceResponse<(IEnumerable<Presentations> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Presentations>(), 0),
+                    IsSuccess = false,
+                    MessageCode = MessageCodes.ErrorDataBase,
+                    Message = result.Message ?? "Error al paginar presentaciones"
+                };
+            }
+            catch (Exception)
+            {
+                return new ServiceResponse<(IEnumerable<Presentations> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Presentations>(), 0),
+                    IsSuccess = false,
+                    MessageCode = MessageCodes.ErrorDataBase,
+                    Message = "Ocurrió un error inesperado al consultar presentaciones paginadas."
                 };
             }
         }

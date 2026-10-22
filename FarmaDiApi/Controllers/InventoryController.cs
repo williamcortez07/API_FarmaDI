@@ -1,14 +1,15 @@
-﻿using FarmaDiBusiness.DTOs;
+using FarmaDiBusiness.DTOs;
 using FarmaDiBusiness.DTOs.Inventory;
 using FarmaDiBusiness.Interfaces;
-using FarmaDiCore.Common;
 using Microsoft.AspNetCore.Mvc;
+using System;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiApi.Controllers
 {
     [Route("api/[controller]")]
-    [ApiController]
-    public class InventoryController : ControllerBase
+    public class InventoryController : BaseApiController
     {
         private readonly IInventoryService _inventoryService;
 
@@ -22,10 +23,9 @@ namespace FarmaDiApi.Controllers
         {
             var serviceResponse = await _inventoryService.GetAllAsync();
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                // Mapeo de los datos recibidos a la estructura del GetAllInventoryDto usando LINQ
-                var inventoryDtoCollection = serviceResponse.Data!.Select(i => new GetAllInventoryDto
+                var inventoryDtoCollection = serviceResponse.Data.Select(i => new GetAllInventoryDto
                 {
                     InventoryId = i.InventoryId,
                     ProductId = i.oproduct.ProductId,
@@ -33,59 +33,29 @@ namespace FarmaDiApi.Controllers
                     SalePrice = i.SalePrice,
                     PurchasePrice = i.PurchasePrice,
                     CriticalStock = i.CriticalStock
-                }).ToList(); // CORREGIDO: .ToList() evita doble enumeración al contar y responder
+                });
 
-                var apiResponse = new ApiResponse<IEnumerable<GetAllInventoryDto>>
-                {
-                    Data = inventoryDtoCollection,
-                    Meta = new
-                    {
-                        TotalAmount = inventoryDtoCollection.Count,
-                        message = serviceResponse.Message
-                    }
-                };
-                return Ok(apiResponse);
+                return Ok(BuildCollectionResponse(inventoryDtoCollection, serviceResponse.Message));
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NoData:
-                    unsuccessfulResponse.Code = "200";
-                    unsuccessfulResponse.Message = "No se encontraron registros";
-                    unsuccessfulResponse.Details = new { info = "Temporalmente no hay registros en la BD" };
-                    return Ok(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = "Error interno en la aplicación" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(serviceResponse);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            if (id <= 0) // CORREGIDO: Removido 'id == null' por ser un int primitivo
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
             {
-                var response = new UnsuccessfulResponseDto
-                {
-                    Code = "400",
-                    Message = "Id proporcionado debe de ser mayor a 0",
-                    Details = new { info = "Error en el formato de valor enviado" }
-                };
-                return BadRequest(response);
+                return validationError!;
             }
 
             var serviceResponse = await _inventoryService.GetByIdAsync(id);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                // CORREGIDO: Nombre de variable homogeneizado (Antes se llamaba brandDto)
                 var inventoryDto = new GetAllInventoryDto
                 {
-                    InventoryId = serviceResponse.Data!.InventoryId,
+                    InventoryId = serviceResponse.Data.InventoryId,
                     ProductId = serviceResponse.Data.oproduct.ProductId,
                     ProductGenericname = serviceResponse.Data.oproduct.GenericName,
                     SalePrice = serviceResponse.Data.SalePrice,
@@ -96,55 +66,104 @@ namespace FarmaDiApi.Controllers
                 return Ok(inventoryDto);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = $"No se encontró ningun dato relacionado al Id {id}";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "No se encontró el recurso solicitado" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno no esperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: $"No se encontró ningún dato relacionado al Id {id}");
         }
 
+        [HttpGet("paged")]
+        public async Task<IActionResult> GetPaged([FromQuery] int page = 1, [FromQuery] int limit = 10)
+        {
+            NormalizePagination(ref page, ref limit);
+
+            var serviceResponse = await _inventoryService.GetInventoryPagedAsync(page, limit);
+
+            if (serviceResponse.IsSuccess && serviceResponse.Data.Items != null)
+            {
+                var (items, totalCount) = serviceResponse.Data;
+                return Ok(BuildPagedResponse(items, totalCount, page, limit));
+            }
+
+            return MapServiceError(serviceResponse);
+        }
+
+        [HttpGet("with-details")]
+        public async Task<IActionResult> GetWithDetails(
+            [FromQuery] int? categoryId,
+            [FromQuery] string? estado,
+            [FromQuery] int? brandId,
+            [FromQuery] int? supplierId,
+            [FromQuery] DateTime? fechaCorte,
+            [FromQuery] int page = 1,
+            [FromQuery] int limit = 10)
+        {
+            NormalizePagination(ref page, ref limit);
+
+            var serviceResponse = await _inventoryService.GetInventoryWithDetailsAsync(
+                page,
+                limit,
+                categoryId,
+                estado,
+                brandId,
+                supplierId,
+                fechaCorte);
+
+            if (serviceResponse.IsSuccess && serviceResponse.Data.Items != null)
+            {
+                var (items, totalCount) = serviceResponse.Data;
+                return Ok(BuildPagedResponse(items, totalCount, page, limit));
+            }
+
+            return MapServiceError(serviceResponse);
+        }
+
+        [HttpGet("{productId}/details")]
+        public async Task<IActionResult> GetByIdWithDetails(int productId)
+        {
+            if (!TryValidatePositiveId(productId, "ProductId", out var validationError))
+            {
+                return validationError!;
+            }
+
+            var serviceResponse = await _inventoryService.GetByIdWithDetailsAsync(productId);
+
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
+            {
+                return Ok(serviceResponse.Data);
+            }
+
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: $"No se encontró inventario con detalles para el producto con Id {productId}");
+        }
 
         [HttpGet("dashboard")]
         public async Task<IActionResult> GetDashboard(
-    [FromQuery] int? categoryId,
-    [FromQuery] string? estado,
-    [FromQuery] int? brandId,
-    [FromQuery] int? supplierId,
-    [FromQuery] DateTime? fechaCorte,
-    [FromQuery] int page = 1,
-    [FromQuery] int limit = 10)
+            [FromQuery] int? categoryId,
+            [FromQuery] string? estado,
+            [FromQuery] int? brandId,
+            [FromQuery] int? supplierId,
+            [FromQuery] DateTime? fechaCorte,
+            [FromQuery] int page = 1,
+            [FromQuery] int limit = 10)
         {
-            // 1. Validaciones de la paginación
-            if (page <= 0) page = 1;
-            if (limit <= 0) limit = 10;
-            if (limit > 100) limit = 100;
+            NormalizePagination(ref page, ref limit);
 
-            // 2. Llamada al servicio
-            var serviceResponse = await _inventoryService.GetDashboardAsync(page, limit, categoryId, estado, brandId, supplierId, fechaCorte);
+            var serviceResponse = await _inventoryService.GetDashboardAsync(
+                page,
+                limit,
+                categoryId,
+                estado,
+                brandId,
+                supplierId,
+                fechaCorte);
 
-            // 3. Manejo de éxito
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                // Tu DTO completo devuelto por el servicio
                 var dashboardData = serviceResponse.Data;
-
-                // Extraemos el total de registros directamente desde el Summary de tu DTO
                 int totalCount = dashboardData.Summary.TotalProductos;
-
-                // Calculamos las páginas
                 int totalPages = (int)Math.Ceiling(totalCount / (double)limit);
 
-                // Preparamos el ApiResponse combinando los datos y la metadata
                 var apiResponse = new ApiResponse<InventoryDashboardDto>
                 {
                     Data = dashboardData,
@@ -160,23 +179,7 @@ namespace FarmaDiApi.Controllers
                 return Ok(apiResponse);
             }
 
-            // 4. Manejo de errores
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NoData:
-                    unsuccessfulResponse.Code = "200";
-                    unsuccessfulResponse.Message = "No se encontraron registros de inventario";
-                    unsuccessfulResponse.Details = new { info = "No hay datos que coincidan con los filtros proporcionados" };
-                    return Ok(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado al cargar el dashboard";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno en la aplicación" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(serviceResponse);
         }
     }
 }

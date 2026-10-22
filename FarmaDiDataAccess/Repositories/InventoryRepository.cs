@@ -1,9 +1,13 @@
-﻿using FarmaDiCore.Common;
+using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
 using FarmaDiDataAccess.Interfaces;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
+using System;
+using System.Collections.Generic;
 using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiDataAccess.Repositories
 {
@@ -18,7 +22,7 @@ namespace FarmaDiDataAccess.Repositories
 
         public async Task<RepositoryResponse<IEnumerable<Inventory>>> GetAllAsync()
         {
-            var inventoryList = new List<Inventory>(); // CORREGIDO: Nombre semántico para evitar confusión visual
+            var inventoryList = new List<Inventory>();
             var response = new RepositoryResponse<IEnumerable<Inventory>>();
             try
             {
@@ -57,7 +61,7 @@ namespace FarmaDiDataAccess.Repositories
             {
                 response.Data = null;
                 response.OperationStatusCode = ex.Number;
-                response.Message = ex.Message; // CORREGIDO: Añadida trazabilidad del mensaje de error nativo
+                response.Message = ex.Message;
             }
             catch (Exception ex)
             {
@@ -73,7 +77,7 @@ namespace FarmaDiDataAccess.Repositories
 
         public async Task<RepositoryResponse<Inventory>> GetByIdAsync(int id)
         {
-            var inventoryResult = new Inventory(); // CORREGIDO: Renombrado para diferenciarlo del wrapper de retorno
+            var inventoryResult = new Inventory();
             try
             {
                 using (SqlConnection connection = new SqlConnection(_connectionString))
@@ -117,7 +121,7 @@ namespace FarmaDiDataAccess.Repositories
                     Message = ex.Message
                 };
             }
-            catch (Exception ex) // CORREGIDO: Agregado bloque catch genérico para mitigar crashes inesperados en producción
+            catch (Exception ex)
             {
                 return new RepositoryResponse<Inventory>
                 {
@@ -127,8 +131,6 @@ namespace FarmaDiDataAccess.Repositories
                 };
             }
         }
-
-
 
         public async Task<RepositoryResponse<InventoryDashboard>> GetDashboardAsync(int page, int limit, int? categoryId, string? estado, int? brandId, int? supplierId, DateTime? fechaCorte)
         {
@@ -145,18 +147,15 @@ namespace FarmaDiDataAccess.Repositories
                     SqlCommand cmd = new SqlCommand("USP_GetAllInventory", connection);
                     cmd.CommandType = CommandType.StoredProcedure;
 
-                    // Parametros de entrada para la paginacion
                     cmd.Parameters.AddWithValue("@PageNumber", page);
                     cmd.Parameters.AddWithValue("@PageSize", limit);
 
-                    // 🔴 SOLUCIÓN: Declaración del parámetro de salida (Output)
                     SqlParameter totalRecordsParam = new SqlParameter("@TotalRecords", SqlDbType.Int)
                     {
                         Direction = ParameterDirection.Output
                     };
                     cmd.Parameters.Add(totalRecordsParam);
 
-                    // Parámetros opcionales (Manejo de NULL para SQL)
                     cmd.Parameters.AddWithValue("@CategoryId", categoryId ?? (object)DBNull.Value);
                     cmd.Parameters.AddWithValue("@Estado", string.IsNullOrEmpty(estado) ? DBNull.Value : estado);
                     cmd.Parameters.AddWithValue("@BrandId", brandId ?? (object)DBNull.Value);
@@ -182,27 +181,23 @@ namespace FarmaDiDataAccess.Repositories
                                 response.Data.Items.Add(new InventoryItem
                                 {
                                     ProductId = (int)reader["ProductId"],
-                                    Producto = reader["Producto"].ToString(),
-                                    NombreGenerico = reader["NombreGenerico"].ToString(),
+                                    Producto = reader["Producto"] is DBNull ? string.Empty : reader["Producto"].ToString()!,
+                                    NombreGenerico = reader["NombreGenerico"] is DBNull ? string.Empty : reader["NombreGenerico"].ToString()!,
                                     CategoryId = (int)reader["CategoryId"],
-                                    Categoria = reader["Categoria"].ToString(),
-
-                                    // Manejo de nulos para IDs opcionales
+                                    Categoria = reader["Categoria"] is DBNull ? string.Empty : reader["Categoria"].ToString()!,
                                     PresentationId = reader["PresentationId"] != DBNull.Value ? (int)reader["PresentationId"] : null,
                                     ConcentrationId = reader["ConcentrationId"] != DBNull.Value ? (int)reader["ConcentrationId"] : null,
-                                    ConcentrationValue = reader["ConcentrationValue"] != DBNull.Value ? reader["ConcentrationValue"].ToString() : string.Empty,
+                                    ConcentrationValue = reader["ConcentrationValue"] != DBNull.Value ? reader["ConcentrationValue"].ToString()! : string.Empty,
                                     SupplierId = reader["SupplierId"] != DBNull.Value ? (int)reader["SupplierId"] : null,
                                     BrandId = reader["BrandId"] != DBNull.Value ? (int)reader["BrandId"] : null,
-
                                     Isactive = (bool)reader["Isactive"],
                                     Precio = reader["Precio"] != DBNull.Value ? Convert.ToDecimal(reader["Precio"]) : 0,
                                     PrecioCosto = reader["PrecioCosto"] != DBNull.Value ? Convert.ToDecimal(reader["PrecioCosto"]) : 0,
                                     StockCritico = reader["StockCritico"] != DBNull.Value ? Convert.ToInt32(reader["StockCritico"]) : 0,
-
                                     Existencia = Convert.ToInt32(reader["Existencia"]),
                                     CantidadVencida = Convert.ToInt32(reader["CantidadVencida"]),
                                     ValorProducto = Convert.ToDecimal(reader["ValorProducto"]),
-                                    Estado = reader["Estado"].ToString()
+                                    Estado = reader["Estado"] is DBNull ? string.Empty : reader["Estado"].ToString()!
                                 });
                             }
                         }
@@ -215,7 +210,7 @@ namespace FarmaDiDataAccess.Repositories
                                 response.Data.Batches.Add(new InventoryBatchInfo
                                 {
                                     BatchId = (int)reader["BatchId"],
-                                    NumeroLote = reader["NumeroLote"].ToString(),
+                                    NumeroLote = reader["NumeroLote"] is DBNull ? string.Empty : reader["NumeroLote"].ToString()!,
                                     FechaFabricacion = Convert.ToDateTime(reader["FechaFabricacion"]),
                                     FechaVencimiento = Convert.ToDateTime(reader["FechaVencimiento"]),
                                     CantidadOriginal = Convert.ToInt32(reader["CantidadOriginal"]),
@@ -225,13 +220,21 @@ namespace FarmaDiDataAccess.Repositories
                                     Activo = (bool)reader["Activo"],
                                     StockId = (int)reader["StockId"],
                                     FechaEntradaStock = Convert.ToDateTime(reader["FechaEntradaStock"]),
-                                    EstadoLote = reader["EstadoLote"].ToString()
+                                    EstadoLote = reader["EstadoLote"] is DBNull ? string.Empty : reader["EstadoLote"].ToString()!
                                 });
                             }
                         }
-                    } // IMPORTANTE: El DataReader se cierra aquí.
+                    }
 
-                    // Asignamos 0 como éxito porque este SP no retorna un @ReturnValue explícito
+                    if (totalRecordsParam.Value != DBNull.Value)
+                    {
+                        response.Data.TotalRecords = Convert.ToInt32(totalRecordsParam.Value);
+                    }
+                    else
+                    {
+                        response.Data.TotalRecords = response.Data.Summary.TotalProductos;
+                    }
+
                     response.OperationStatusCode = 0;
                 }
             }
@@ -249,6 +252,110 @@ namespace FarmaDiDataAccess.Repositories
             }
 
             return response;
+        }
+
+        public async Task<RepositoryResponse<(InventoryItem? Item, IEnumerable<InventoryBatchInfo> Batches)>> GetInventoryWithDetailsByProductIdAsync(int productId)
+        {
+            try
+            {
+                using (var connection = new SqlConnection(_connectionString))
+                {
+                    await connection.OpenAsync();
+                    using (var cmd = new SqlCommand("USP_GetInventoryWithDetailsByProductId", connection))
+                    {
+                        cmd.CommandType = CommandType.StoredProcedure;
+                        cmd.Parameters.AddWithValue("@ProductId", productId);
+
+                        InventoryItem? item = null;
+                        var batches = new List<InventoryBatchInfo>();
+
+                        using (var reader = await cmd.ExecuteReaderAsync())
+                        {
+                            if (await reader.ReadAsync())
+                            {
+                                item = new InventoryItem
+                                {
+                                    ProductId = (int)reader["ProductId"],
+                                    Producto = reader["Producto"] is DBNull ? string.Empty : reader["Producto"].ToString()!,
+                                    NombreGenerico = reader["NombreGenerico"] is DBNull ? string.Empty : reader["NombreGenerico"].ToString()!,
+                                    CategoryId = (int)reader["CategoryId"],
+                                    Categoria = reader["Categoria"] is DBNull ? string.Empty : reader["Categoria"].ToString()!,
+                                    PresentationId = reader["PresentationId"] != DBNull.Value ? (int)reader["PresentationId"] : null,
+                                    ConcentrationId = reader["ConcentrationId"] != DBNull.Value ? (int)reader["ConcentrationId"] : null,
+                                    ConcentrationValue = reader["ConcentrationValue"] != DBNull.Value ? reader["ConcentrationValue"].ToString()! : string.Empty,
+                                    SupplierId = reader["SupplierId"] != DBNull.Value ? (int)reader["SupplierId"] : null,
+                                    BrandId = reader["BrandId"] != DBNull.Value ? (int)reader["BrandId"] : null,
+                                    Isactive = (bool)reader["Isactive"],
+                                    Precio = reader["Precio"] != DBNull.Value ? Convert.ToDecimal(reader["Precio"]) : 0,
+                                    PrecioCosto = reader["PrecioCosto"] != DBNull.Value ? Convert.ToDecimal(reader["PrecioCosto"]) : 0,
+                                    StockCritico = reader["StockCritico"] != DBNull.Value ? Convert.ToInt32(reader["StockCritico"]) : 0,
+                                    Existencia = Convert.ToInt32(reader["Existencia"]),
+                                    CantidadVencida = Convert.ToInt32(reader["CantidadVencida"]),
+                                    ValorProducto = Convert.ToDecimal(reader["ValorProducto"]),
+                                    Estado = reader["Estado"] is DBNull ? string.Empty : reader["Estado"].ToString()!
+                                };
+                            }
+
+                            if (item == null)
+                            {
+                                return new RepositoryResponse<(InventoryItem? Item, IEnumerable<InventoryBatchInfo> Batches)>
+                                {
+                                    Data = (null, Enumerable.Empty<InventoryBatchInfo>()),
+                                    OperationStatusCode = 50009,
+                                    Message = "No se encontró el inventario para el producto indicado"
+                                };
+                            }
+
+                            if (await reader.NextResultAsync())
+                            {
+                                while (await reader.ReadAsync())
+                                {
+                                    batches.Add(new InventoryBatchInfo
+                                    {
+                                        BatchId = (int)reader["BatchId"],
+                                        NumeroLote = reader["NumeroLote"] is DBNull ? string.Empty : reader["NumeroLote"].ToString()!,
+                                        FechaFabricacion = Convert.ToDateTime(reader["FechaFabricacion"]),
+                                        FechaVencimiento = Convert.ToDateTime(reader["FechaVencimiento"]),
+                                        CantidadOriginal = Convert.ToInt32(reader["CantidadOriginal"]),
+                                        CantidadDisponible = Convert.ToInt32(reader["CantidadDisponible"]),
+                                        ProductId = (int)reader["ProductId"],
+                                        FechaRegistro = Convert.ToDateTime(reader["FechaRegistro"]),
+                                        Activo = (bool)reader["Activo"],
+                                        StockId = (int)reader["StockId"],
+                                        FechaEntradaStock = Convert.ToDateTime(reader["FechaEntradaStock"]),
+                                        EstadoLote = reader["EstadoLote"] is DBNull ? string.Empty : reader["EstadoLote"].ToString()!
+                                    });
+                                }
+                            }
+                        }
+
+                        return new RepositoryResponse<(InventoryItem? Item, IEnumerable<InventoryBatchInfo> Batches)>
+                        {
+                            Data = (item, batches),
+                            OperationStatusCode = 0,
+                            Message = "Operación exitosa"
+                        };
+                    }
+                }
+            }
+            catch (SqlException ex)
+            {
+                return new RepositoryResponse<(InventoryItem? Item, IEnumerable<InventoryBatchInfo> Batches)>
+                {
+                    Data = (null, Enumerable.Empty<InventoryBatchInfo>()),
+                    OperationStatusCode = ex.Number,
+                    Message = ex.Message
+                };
+            }
+            catch (Exception ex)
+            {
+                return new RepositoryResponse<(InventoryItem? Item, IEnumerable<InventoryBatchInfo> Batches)>
+                {
+                    Data = (null, Enumerable.Empty<InventoryBatchInfo>()),
+                    OperationStatusCode = -1,
+                    Message = ex.Message
+                };
+            }
         }
     }
 }

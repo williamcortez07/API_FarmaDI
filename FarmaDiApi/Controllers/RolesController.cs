@@ -1,16 +1,16 @@
-﻿using FarmaDiBusiness.DTOs;
 using FarmaDiBusiness.DTOs.Roles;
 using FarmaDiBusiness.DTOs.RolsDto;
 using FarmaDiBusiness.Interfaces;
-using FarmaDiCore.Common;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.IdentityModel.Tokens;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiApi.Controllers
 {
     [Route("api/[controller]")]
-    [ApiController]
-    public class RolesController : ControllerBase
+    [Authorize(Roles = "Administrador,Admin")]
+    public class RolesController : BaseApiController
     {
         private readonly IRolService _rolService;
 
@@ -22,13 +22,18 @@ namespace FarmaDiApi.Controllers
         [HttpPost]
         public async Task<IActionResult> Add([FromBody] AddRolDto addRolDto)
         {
+            if (addRolDto == null)
+            {
+                return BadRequestError("El cuerpo de la solicitud no puede estar vacío.");
+            }
+
             var serviceResponse = await _rolService.AddRolAsync(addRolDto);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var rolDto = new RolDto
                 {
-                    RolId = serviceResponse.Data!.Id,
+                    RolId = serviceResponse.Data.Id,
                     RolName = serviceResponse.Data.RolName,
                     IsActive = serviceResponse.Data.IsActive,
                 };
@@ -39,22 +44,9 @@ namespace FarmaDiApi.Controllers
                     rolDto);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.Conflict:
-                    unsuccessfulResponse.Code = "409";
-                    unsuccessfulResponse.Message = "El nombre del rol ya existe";
-                    unsuccessfulResponse.Details = new { info = "No se puede duplicar el nombre del rol" };
-                    return Conflict(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    // CORREGIDO: Antes retornaba BadRequest(400) para un error interno 500
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customConflictMessage: "El nombre del rol ya existe");
         }
 
         [HttpGet]
@@ -62,66 +54,59 @@ namespace FarmaDiApi.Controllers
         {
             var serviceResponse = await _rolService.GetAllRolsAsync();
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                // CORREGIDO: Se añade .ToList() para evitar la doble enumeración diferida de LINQ
-                var rolesDtoCollection = serviceResponse.Data!.Select(r => new GetAllRolsDto
+                var rolesDtoCollection = serviceResponse.Data.Select(r => new GetAllRolsDto
                 {
                     Id = r.Id,
                     RolName = r.RolName,
                     IsActive = r.IsActive
-                }).ToList();
+                });
 
-                var apiResponse = new ApiResponse<IEnumerable<GetAllRolsDto>>
-                {
-                    Data = rolesDtoCollection,
-                    Meta = new
-                    {
-                        TotalAmount = rolesDtoCollection.Count,
-                        message = serviceResponse.Message
-                    }
-                };
-                return Ok(apiResponse);
+                return Ok(BuildCollectionResponse(rolesDtoCollection, serviceResponse.Message));
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
+            return MapServiceError(serviceResponse);
+        }
+
+        [HttpGet("paged")]
+        public async Task<IActionResult> GetPaged([FromQuery] int page = 1, [FromQuery] int limit = 10)
+        {
+            NormalizePagination(ref page, ref limit);
+
+            var serviceResponse = await _rolService.GetRolesPagedAsync(page, limit);
+
+            if (serviceResponse.IsSuccess && serviceResponse.Data.Items != null)
             {
-                case MessageCodes.NoData:
-                    unsuccessfulResponse.Code = "200";
-                    unsuccessfulResponse.Message = "No se encontraron registros";
-                    unsuccessfulResponse.Details = new { info = "Temporalmente no hay registros en la BD" };
-                    return Ok(unsuccessfulResponse);
+                var (items, totalCount) = serviceResponse.Data;
+                var rolesDtoCollection = items.Select(r => new GetAllRolsDto
+                {
+                    Id = r.Id,
+                    RolName = r.RolName,
+                    IsActive = r.IsActive
+                });
 
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = "Error interno en la aplicación" };
-                    return StatusCode(500, unsuccessfulResponse);
+                return Ok(BuildPagedResponse(rolesDtoCollection, totalCount, page, limit));
             }
+
+            return MapServiceError(serviceResponse);
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            if (id <= 0) // CORREGIDO: Removido 'id == null' por incompatibilidad con int primitivo
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
             {
-                var response = new UnsuccessfulResponseDto
-                {
-                    Code = "400",
-                    Message = "Id proporcionado debe de ser mayor a 0",
-                    Details = new { info = "Error en el formato de valor enviado" }
-                };
-                return BadRequest(response);
+                return validationError!;
             }
 
             var serviceResponse = await _rolService.GetRolByIdAsync(id);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var rolDto = new GetAllRolsDto
                 {
-                    Id = serviceResponse.Data!.Id,
+                    Id = serviceResponse.Data.Id,
                     RolName = serviceResponse.Data.RolName,
                     IsActive = serviceResponse.Data.IsActive
                 };
@@ -129,82 +114,60 @@ namespace FarmaDiApi.Controllers
                 return Ok(rolDto);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró un rol asociado al Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "No se encontró el recurso solicitado" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno no esperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró un rol asociado al Id proporcionado");
         }
 
         [HttpPut("{id}")]
         public async Task<IActionResult> Update(int id, [FromBody] UpdateRolDto dataRol)
         {
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
+            {
+                return validationError!;
+            }
+
+            if (dataRol == null)
+            {
+                return BadRequestError("El cuerpo de la solicitud no puede estar vacío.");
+            }
+
             var serviceResponse = await _rolService.UpdateRolAsync(id, dataRol);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                // CORREGIDO: Comentario basura de categorías removido
                 var updatedRol = new RolDto
                 {
-                    RolId = serviceResponse.Data!.Id,
+                    RolId = serviceResponse.Data.Id,
                     RolName = serviceResponse.Data.RolName,
                     IsActive = serviceResponse.Data.IsActive
                 };
+
                 return Ok(updatedRol);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró un rol con el Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Recurso no encontrado" };
-                    return NotFound(unsuccessfulResponse);
-
-                case MessageCodes.Conflict:
-                    unsuccessfulResponse.Code = "409";
-                    unsuccessfulResponse.Message = "El registro no pudo guardarse por un conflicto";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Hubo conflicto en la actualización" };
-                    return Conflict(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró un rol con el Id proporcionado");
         }
 
         [HttpGet("byname/{name}")]
         public async Task<IActionResult> GetByName(string name)
         {
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            if (name.IsNullOrEmpty())
+            if (string.IsNullOrWhiteSpace(name))
             {
-                unsuccessfulResponse.Code = "400";
-                unsuccessfulResponse.Message = "El dato proporcionado no es válido";
-                unsuccessfulResponse.Details = new { Error = "El nombre no puede ser nulo o vacío" };
-                return BadRequest(unsuccessfulResponse);
+                return BadRequestError(
+                    "El dato proporcionado no es válido",
+                    new { Error = "El nombre no puede ser nulo o vacío" });
             }
 
             var serviceResponse = await _rolService.GetRolByNameAsync(name);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var rolDto = new GetAllRolsDto
                 {
-                    Id = serviceResponse.Data!.Id,
+                    Id = serviceResponse.Data.Id,
                     RolName = serviceResponse.Data.RolName,
                     IsActive = serviceResponse.Data.IsActive
                 };
@@ -212,53 +175,35 @@ namespace FarmaDiApi.Controllers
                 return Ok(rolDto);
             }
 
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = serviceResponse.Message ?? "Rol no encontrado";
-                    unsuccessfulResponse.Details = new { Error = "El recurso solicitado no está disponible en el servidor" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = serviceResponse.Message ?? "Ocurrió un error inesperado";
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "Rol no encontrado");
         }
 
         [HttpPatch("{id}/state")]
         public async Task<IActionResult> SetState(int id, [FromQuery] bool state)
         {
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
+            {
+                return validationError!;
+            }
+
             var serviceResponse = await _rolService.SetRolStateAsync(id, state);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                // CORREGIDO: Comentarios de marcas y categorías removidos
                 return Ok(new
                 {
-                    serviceResponse.Data!.Id,
+                    serviceResponse.Data.Id,
                     serviceResponse.Data.RolName,
                     serviceResponse.Data.IsActive,
                     serviceResponse.Message
                 });
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "No se encontró un rol con el Id proporcionado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Recurso no encontrado" };
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error inesperado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Error interno inesperado" };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "No se encontró un rol con el Id proporcionado");
         }
     }
 }

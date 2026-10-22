@@ -1,4 +1,4 @@
-﻿using FarmaDiBusiness.DTOs;
+using FarmaDiBusiness.DTOs;
 using FarmaDiBusiness.DTOs.Roles;
 using FarmaDiBusiness.DTOs.RolsDto;
 using FarmaDiBusiness.Interfaces;
@@ -319,6 +319,43 @@ namespace FarmaDiBusiness.Services
                     IsSuccess = false,
                     MessageCode = MessageCodes.ErrorDataBase,
                     Message = "Ocurrió un error inesperado al modificar el estado del rol"
+                };
+            }
+        }
+    
+        public async Task<ServiceResponse<(IEnumerable<Roles> Items, int TotalCount)>> GetRolesPagedAsync(int page, int limit)
+        {
+            try
+            {
+                var result = await _rolRepository.GetRolesPagedAsync(page, limit);
+
+                if (result.OperationStatusCode == 0)
+                {
+                    return new ServiceResponse<(IEnumerable<Roles> Items, int TotalCount)>
+                    {
+                        Data = result.Data,
+                        IsSuccess = true,
+                        MessageCode = MessageCodes.Success,
+                        Message = "Operación exitosa"
+                    };
+                }
+
+                return new ServiceResponse<(IEnumerable<Roles> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Roles>(), 0),
+                    IsSuccess = false,
+                    MessageCode = MessageCodes.ErrorDataBase,
+                    Message = result.Message ?? "Error al paginar roles"
+                };
+            }
+            catch (Exception)
+            {
+                return new ServiceResponse<(IEnumerable<Roles> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<Roles>(), 0),
+                    IsSuccess = false,
+                    MessageCode = MessageCodes.ErrorDataBase,
+                    Message = "Ocurrió un error inesperado al paginar roles."
                 };
             }
         }

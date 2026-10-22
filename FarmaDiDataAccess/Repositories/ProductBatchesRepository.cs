@@ -1,9 +1,13 @@
-﻿using FarmaDiCore.Common;
+using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
 using FarmaDiDataAccess.Interfaces;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
+using System;
+using System.Collections.Generic;
 using System.Data;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiDataAccess.Repositories
 {
@@ -18,7 +22,7 @@ namespace FarmaDiDataAccess.Repositories
 
         public async Task<RepositoryResponse<IEnumerable<ProductBatches>>> GetAllAsync()
         {
-            var batchList = new List<ProductBatches>(); // CORREGIDO: Nombre semántico en camelCase
+            var batchList = new List<ProductBatches>();
             var response = new RepositoryResponse<IEnumerable<ProductBatches>>();
             try
             {
@@ -60,7 +64,7 @@ namespace FarmaDiDataAccess.Repositories
             {
                 response.Data = null;
                 response.OperationStatusCode = ex.Number;
-                response.Message = ex.Message; // CORREGIDO: Agregada trazabilidad nativa del error de SQL
+                response.Message = ex.Message;
             }
             catch (Exception ex)
             {
@@ -76,7 +80,7 @@ namespace FarmaDiDataAccess.Repositories
 
         public async Task<RepositoryResponse<ProductBatches>> GetByIdAsync(int id)
         {
-            var batchResult = new ProductBatches(); // CORREGIDO: Renombrado para evitar colisión visual con el wrapper
+            var batchResult = new ProductBatches();
             try
             {
                 using (SqlConnection connection = new SqlConnection(_connectionString))
@@ -123,11 +127,86 @@ namespace FarmaDiDataAccess.Repositories
                     Message = ex.Message
                 };
             }
-            catch (Exception ex) // CORREGIDO: Agregado catch global para mitigar crasheos catastróficos por fallos de casteo
+            catch (Exception ex)
             {
                 return new RepositoryResponse<ProductBatches>
                 {
                     Data = null,
+                    OperationStatusCode = -1,
+                    Message = ex.Message
+                };
+            }
+        }
+
+        public async Task<RepositoryResponse<(IEnumerable<ProductBatches> Items, int TotalCount)>> GetBatchesPagedAsync(int pageNumber, int pageSize)
+        {
+            var batchList = new List<ProductBatches>();
+            int totalCount = 0;
+            try
+            {
+                using (SqlConnection connection = new SqlConnection(_connectionString))
+                {
+                    await connection.OpenAsync();
+                    SqlCommand cmd = new SqlCommand("USP_GetProductBatchesPaged", connection);
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@PageNumber", pageNumber);
+                    cmd.Parameters.AddWithValue("@PageSize", pageSize);
+
+                    var totalRecordsParam = new SqlParameter("@TotalRecords", SqlDbType.Int)
+                    {
+                        Direction = ParameterDirection.Output
+                    };
+                    cmd.Parameters.Add(totalRecordsParam);
+
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            batchList.Add(new ProductBatches
+                            {
+                                Id = (int)reader["BatchId"],
+                                BatchNumer = reader["BatchNumber"].ToString()!,
+                                ManufacturingDate = (DateTime)reader["ManufacturingDate"],
+                                ExpirationDate = (DateTime)reader["ExpirationDate"],
+                                Quantity = (int)reader["Quantity"],
+                                oProduct = new Products
+                                {
+                                    ProductId = (int)reader["ProductId"],
+                                    GenericName = string.Empty,
+                                    TradeName = reader["ProductTradeName"].ToString()!
+                                },
+                                IsActive = (bool)reader["Isactive"]
+                            });
+                        }
+                    }
+
+                    if (totalRecordsParam.Value != DBNull.Value)
+                    {
+                        totalCount = Convert.ToInt32(totalRecordsParam.Value);
+                    }
+
+                    return new RepositoryResponse<(IEnumerable<ProductBatches> Items, int TotalCount)>
+                    {
+                        Data = (batchList, totalCount),
+                        OperationStatusCode = 0,
+                        Message = "Operación exitosa"
+                    };
+                }
+            }
+            catch (SqlException ex)
+            {
+                return new RepositoryResponse<(IEnumerable<ProductBatches> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<ProductBatches>(), 0),
+                    OperationStatusCode = ex.Number,
+                    Message = ex.Message
+                };
+            }
+            catch (Exception ex)
+            {
+                return new RepositoryResponse<(IEnumerable<ProductBatches> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<ProductBatches>(), 0),
                     OperationStatusCode = -1,
                     Message = ex.Message
                 };

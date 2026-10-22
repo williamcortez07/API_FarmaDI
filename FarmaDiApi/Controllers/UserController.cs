@@ -1,16 +1,16 @@
-﻿using FarmaDiBusiness.DTOs;
 using FarmaDiBusiness.DTOs.RolsDto;
 using FarmaDiBusiness.DTOs.UsersDto;
 using FarmaDiBusiness.Interfaces;
-using FarmaDiCore.Common;
-using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiApi.Controllers
 {
     [Route("api/[controller]")]
-    [ApiController]
-    public class UserController : ControllerBase
+    [Authorize(Roles = "Administrador,Admin")]
+    public class UserController : BaseApiController
     {
         private readonly IUsersService _userService;
 
@@ -22,13 +22,18 @@ namespace FarmaDiApi.Controllers
         [HttpPost]
         public async Task<IActionResult> Register([FromBody] RegisterUserRolesDto dto)
         {
+            if (dto == null)
+            {
+                return BadRequestError("El cuerpo de la solicitud no puede estar vacío.");
+            }
+
             var serviceResponse = await _userService.RegisterUserWithRolesAsync(dto);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 var dataResponse = new UserRolResponseDto
                 {
-                    UserName = serviceResponse.Data!.Users.UserName,
+                    UserName = serviceResponse.Data.Users.UserName,
                     UserLastName = serviceResponse.Data.Users.UserLastName,
                     Mail = serviceResponse.Data.Users.Mail,
                     UserPhone = serviceResponse.Data.Users.UserPhone,
@@ -39,98 +44,74 @@ namespace FarmaDiApi.Controllers
                     }).ToList()
                 };
 
-                // CORREGIDO: Se envía el ID real del usuario creado en lugar de la lista de roles
                 return CreatedAtAction(
                     nameof(GetById),
                     new { id = serviceResponse.Data.Users.UserId },
                     dataResponse);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto(); // CORREGIDO: Casing camelCase
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "Recurso relacional no encontrado";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message ?? "Uno o varios de los Roles proporcionados no existen." };
-                    return NotFound(unsuccessfulResponse);
-                case MessageCodes.ErrorValidation:
-                    unsuccessfulResponse.Code = "400";
-                    unsuccessfulResponse.Message = "Ocurrió un error en la validación de los datos";
-                    return BadRequest(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error en el servidor";
-                    unsuccessfulResponse.Details = new { info = serviceResponse.Message };
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "Uno o varios de los Roles proporcionados no existen.");
         }
 
         [HttpGet("{id}")]
         public async Task<IActionResult> GetById(int id)
         {
-            if (id <= 0) // CORREGIDO: Añadida protección de entrada para consistencia de arquitectura
+            if (!TryValidatePositiveId(id, "Id", out var validationError))
             {
-                var response = new UnsuccessfulResponseDto
-                {
-                    Code = "400",
-                    Message = "Id proporcionado debe de ser mayor a 0",
-                    Details = new { info = "Error en el formato de valor enviado" }
-                };
-                return BadRequest(response);
+                return validationError!;
             }
 
             var serviceResponse = await _userService.GetByIdAsync(id);
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
                 return Ok(serviceResponse.Data);
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.NotFound:
-                    unsuccessfulResponse.Code = "404";
-                    unsuccessfulResponse.Message = "Usuario no encontrado";
-                    return NotFound(unsuccessfulResponse);
-
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error en el servidor";
-                    return StatusCode(500, unsuccessfulResponse);
-            }
+            return MapServiceError(
+                serviceResponse,
+                customNotFoundMessage: "Usuario no encontrado");
         }
 
         [HttpGet]
-        public async Task<IActionResult> GetAll() // CORREGIDO: Nombre homologado con los demás catálogos
+        public async Task<IActionResult> GetAll()
         {
             var serviceResponse = await _userService.GetAllAsync();
 
-            if (serviceResponse.IsSuccess)
+            if (serviceResponse.IsSuccess && serviceResponse.Data != null)
             {
-                return Ok(serviceResponse.Data);
+                return Ok(BuildCollectionResponse(serviceResponse.Data, serviceResponse.Message));
             }
 
-            var unsuccessfulResponse = new UnsuccessfulResponseDto();
-            switch (serviceResponse.MessageCode)
-            {
-                case MessageCodes.ErrorDataBase:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error en la base de datos";
-                    return StatusCode(500, unsuccessfulResponse);
+            return MapServiceError(serviceResponse);
+        }
 
-                default:
-                    unsuccessfulResponse.Code = "500";
-                    unsuccessfulResponse.Message = "Ocurrió un error en el servidor";
-                    return StatusCode(500, unsuccessfulResponse);
+        [HttpGet("paged")]
+        public async Task<IActionResult> GetPaged([FromQuery] int page = 1, [FromQuery] int limit = 10)
+        {
+            NormalizePagination(ref page, ref limit);
+
+            var serviceResponse = await _userService.GetUsersPagedAsync(page, limit);
+
+            if (serviceResponse.IsSuccess && serviceResponse.Data.Items != null)
+            {
+                var (items, totalCount) = serviceResponse.Data;
+                return Ok(BuildPagedResponse(items, totalCount, page, limit));
             }
+
+            return MapServiceError(serviceResponse);
         }
 
         [HttpPost("assign-role")]
         public async Task<IActionResult> AssignRole([FromBody] UserRoleAssignmentDto assignmentDto)
         {
+            if (assignmentDto == null)
+            {
+                return BadRequestError("El cuerpo de la solicitud no puede estar vacío.");
+            }
+
             var result = await _userService.AssignRoleToUserAsync(assignmentDto.UserId, assignmentDto.RoleId);
 
             if (result.IsSuccess)
@@ -138,18 +119,7 @@ namespace FarmaDiApi.Controllers
                 return Ok(result);
             }
 
-            if (result.MessageCode == MessageCodes.NotFound)
-            {
-                return NotFound(result);
-            }
-
-            if (result.MessageCode == MessageCodes.Conflict)
-            {
-                return Conflict(result);
-            }
-
-            return StatusCode(StatusCodes.Status500InternalServerError, result);
+            return MapServiceError(result);
         }
     }
-    // CORREGIDO: Se eliminó el bloque masivo de código muerto/comentado al final
 }

@@ -1,7 +1,11 @@
-﻿using FarmaDiBusiness.Interfaces;
+using FarmaDiBusiness.Interfaces;
 using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
 using FarmaDiDataAccess.Interfaces;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace FarmaDiBusiness.Services
 {
@@ -18,7 +22,6 @@ namespace FarmaDiBusiness.Services
         {
             try
             {
-                // CORREGIDO: Envoltorio defensivo try-catch añadido para evitar caídas del servidor
                 var result = await _batchRepository.GetAllAsync();
 
                 if (result.OperationStatusCode == 0)
@@ -48,7 +51,7 @@ namespace FarmaDiBusiness.Services
                         {
                             Data = null,
                             IsSuccess = false,
-                            MessageCode = MessageCodes.ErrorDataBase, // CORREGIDO: Mapeo semántico correcto (Antes NoData)
+                            MessageCode = MessageCodes.ErrorDataBase,
                             Message = "Ocurrió un error inesperado"
                         };
                 }
@@ -69,7 +72,6 @@ namespace FarmaDiBusiness.Services
         {
             try
             {
-                // CORREGIDO: Movido de forma segura al interior del bloque try
                 var result = await _batchRepository.GetByIdAsync(id);
 
                 if (result.OperationStatusCode == 0)
@@ -94,8 +96,6 @@ namespace FarmaDiBusiness.Services
                             Message = "El lote no existe"
                         };
 
-                    // CORREGIDO: Se eliminó el case 50007 (Cantidad inferior) por ser un residuo de copy-paste ajeno a lotes
-
                     default:
                         return new ServiceResponse<ProductBatches>
                         {
@@ -113,8 +113,44 @@ namespace FarmaDiBusiness.Services
                     Data = null,
                     IsSuccess = false,
                     MessageCode = MessageCodes.ErrorDataBase,
-                    // CORREGIDO: Mensaje estático seguro para evitar una NullReferenceException accidental
                     Message = "Ocurrió un error inesperado al consultar el lote de producto"
+                };
+            }
+        }
+
+        public async Task<ServiceResponse<(IEnumerable<ProductBatches> Items, int TotalCount)>> GetBatchesPagedAsync(int page, int limit)
+        {
+            try
+            {
+                var result = await _batchRepository.GetBatchesPagedAsync(page, limit);
+
+                if (result.OperationStatusCode == 0)
+                {
+                    return new ServiceResponse<(IEnumerable<ProductBatches> Items, int TotalCount)>
+                    {
+                        Data = result.Data,
+                        IsSuccess = true,
+                        MessageCode = MessageCodes.Success,
+                        Message = "Operación exitosa"
+                    };
+                }
+
+                return new ServiceResponse<(IEnumerable<ProductBatches> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<ProductBatches>(), 0),
+                    IsSuccess = false,
+                    MessageCode = MessageCodes.ErrorDataBase,
+                    Message = result.Message ?? "Error al paginar lotes"
+                };
+            }
+            catch (Exception)
+            {
+                return new ServiceResponse<(IEnumerable<ProductBatches> Items, int TotalCount)>
+                {
+                    Data = (Enumerable.Empty<ProductBatches>(), 0),
+                    IsSuccess = false,
+                    MessageCode = MessageCodes.ErrorDataBase,
+                    Message = "Ocurrió un error inesperado al paginar los lotes de productos."
                 };
             }
         }

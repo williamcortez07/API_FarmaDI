@@ -7,6 +7,7 @@ using FarmaDiBusiness.Services;
 using FarmaDiDataAccess.Interfaces;
 using FarmaDiDataAccess.Repositories;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection.Repositories;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -24,6 +25,20 @@ builder.Services.AddSingleton<ILogService, MongoLogService>();
 // Add services to the container.
 var JwtSettings = builder.Configuration.GetSection("JwtSettings");
 var secretKey = JwtSettings["SecretKey"];
+
+// Si estamos en entorno de desarrollo local y no se configur√≥ por variable de entorno, proveemos una clave segura para pruebas locales
+if (builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(secretKey))
+{
+    secretKey = "FarmaDiDevelopmentLocalSecretKey_MustBeAtLeast32BytesLong!";
+    builder.Configuration["JwtSettings:SecretKey"] = secretKey;
+    builder.Configuration["JWTSettings:SecretKey"] = secretKey;
+}
+
+if (string.IsNullOrWhiteSpace(secretKey) || Encoding.UTF8.GetByteCount(secretKey) < 32)
+{
+    throw new InvalidOperationException(
+        "JwtSettings:SecretKey must be configured with a signing key of at least 32 bytes.");
+}
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -77,6 +92,13 @@ builder.Services.AddAuthentication(options =>
         ValidateIssuerSigningKey = true,
         IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey!))
     };
+});
+
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
 });
 
 builder.Services.AddScoped<IBrandsService, BrandsService>();
@@ -151,7 +173,7 @@ app.UseHttpsRedirection();
 app.UseCors("PermitirFrontend");
 app.UseAuthentication();
 
-// <---Interceptor de AuditorÌa (despuÈs de Auth para leer el User del JWT y antes de los Controladores) --->
+// <---Interceptor de Auditora (despus de Auth para leer el User del JWT y antes de los Controladores) --->
 app.UseMiddleware<AuditLoggingMiddleware>();
 
 app.UseAuthorization();
