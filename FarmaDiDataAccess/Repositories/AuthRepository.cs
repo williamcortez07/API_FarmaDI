@@ -1,9 +1,12 @@
-﻿using FarmaDiCore.Common;
+using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
 using FarmaDiDataAccess.Interfaces;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
+using System;
+using System.Collections.Generic;
 using System.Data;
+using System.Threading.Tasks;
 
 namespace FarmaDiDataAccess.Repositories
 {
@@ -18,10 +21,9 @@ namespace FarmaDiDataAccess.Repositories
 
         public async Task<RepositoryResponse<Users>> RegisterAsync(Users user)
         {
-            var userResult = new Users(); // CORREGIDO: Renombrado semántico para evitar confusión visual
+            var userResult = new Users();
             try
             {
-                // CORREGIDO: El bloque try-catch ahora envuelve la creación de la conexión y el OpenAsync
                 using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
                     await connection.OpenAsync();
@@ -32,14 +34,15 @@ namespace FarmaDiDataAccess.Repositories
                     cmd.Parameters.AddWithValue("@UserLastName", user.UserLastName);
                     cmd.Parameters.AddWithValue("@PasswordHash", user.PasswordHash);
                     cmd.Parameters.AddWithValue("@Mail", user.Mail);
-                    cmd.Parameters.AddWithValue("@UserPhone", user.UserPhone); // CORREGIDO: Añadido el prefijo '@'
-                    cmd.Parameters.AddWithValue("@IsActive", user.IsActive);   // CORREGIDO: Añadido el prefijo '@'
+                    cmd.Parameters.AddWithValue("@UserPhone", user.UserPhone);
+                    cmd.Parameters.AddWithValue("@IsActive", user.IsActive);
                     cmd.Parameters.Add("@ReturnValue", SqlDbType.Int).Direction = ParameterDirection.ReturnValue;
 
                     using (var reader = await cmd.ExecuteReaderAsync())
                     {
                         if (await reader.ReadAsync())
                         {
+                            userResult.UserId = (int)reader["UserId"];
                             userResult.UserName = reader["UserName"].ToString()!;
                             userResult.UserLastName = reader["UserLastName"].ToString()!;
                             userResult.PasswordHash = reader["UserPassword"].ToString()!;
@@ -49,7 +52,26 @@ namespace FarmaDiDataAccess.Repositories
                         }
                     }
 
-                    var returnedValue = Convert.ToInt32(cmd.Parameters["@ReturnValue"].Value); // CORREGIDO: Corrección de typo
+                    // Asignación automática del rol Admin (Id 7) al usuario recién registrado
+                    if (userResult.UserId > 0)
+                    {
+                        try
+                        {
+                            using (SqlCommand assignCmd = new SqlCommand("USP_AsigneRolToUser", connection))
+                            {
+                                assignCmd.CommandType = CommandType.StoredProcedure;
+                                assignCmd.Parameters.AddWithValue("@UserId", userResult.UserId);
+                                assignCmd.Parameters.AddWithValue("@RolId", 7);
+                                await assignCmd.ExecuteNonQueryAsync();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[WARNING] No se pudo asignar el rol inicial al usuario {userResult.UserId}: {ex.Message}");
+                        }
+                    }
+
+                    var returnedValue = Convert.ToInt32(cmd.Parameters["@ReturnValue"].Value);
                     return new RepositoryResponse<Users>
                     {
                         Data = userResult,
@@ -66,7 +88,7 @@ namespace FarmaDiDataAccess.Repositories
                     Message = ex.Message
                 };
             }
-            catch (Exception ex) // CORREGIDO: Agregado control global contra fallos de mapeo/lectura
+            catch (Exception ex)
             {
                 return new RepositoryResponse<Users>
                 {
@@ -84,7 +106,6 @@ namespace FarmaDiDataAccess.Repositories
 
             try
             {
-                // CORREGIDO: Reubicación del try-catch hacia la raíz del método
                 using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
                     await connection.OpenAsync();
@@ -125,7 +146,7 @@ namespace FarmaDiDataAccess.Repositories
                 repositoryResponse.Message = ex.Message;
                 return repositoryResponse;
             }
-            catch (Exception ex) // CORREGIDO: Agregado control global contra fallos de infraestructura/mapeo
+            catch (Exception ex)
             {
                 repositoryResponse.Data = null;
                 repositoryResponse.OperationStatusCode = -1;
@@ -141,12 +162,12 @@ namespace FarmaDiDataAccess.Repositories
 
             try
             {
-                // CORREGIDO: Reubicación del try-catch hacia la raíz del método
                 using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
                     await connection.OpenAsync();
                     SqlCommand cmd = new SqlCommand("USP_GetUserByName", connection);
                     cmd.CommandType = CommandType.StoredProcedure;
+
                     cmd.Parameters.AddWithValue("@UserName", name);
                     cmd.Parameters.Add("@ReturnValue", SqlDbType.Int).Direction = ParameterDirection.ReturnValue;
 
@@ -181,7 +202,7 @@ namespace FarmaDiDataAccess.Repositories
                 repositoryResponse.Message = ex.Message;
                 return repositoryResponse;
             }
-            catch (Exception ex) // CORREGIDO: Agregado control global contra fallos de infraestructura/mapeo
+            catch (Exception ex)
             {
                 repositoryResponse.Data = null;
                 repositoryResponse.OperationStatusCode = -1;
@@ -192,12 +213,11 @@ namespace FarmaDiDataAccess.Repositories
 
         public async Task<RepositoryResponse<IEnumerable<string>>> GetRolesByUserIdAsync(int userId)
         {
-            var rolesList = new List<string>(); // CORREGIDO: Nombre de variable bajo estándar camelCase
+            var rolesList = new List<string>();
             var repositoryResponse = new RepositoryResponse<IEnumerable<string>>();
 
             try
             {
-                // CORREGIDO: Reubicación del try-catch hacia la raíz del método
                 using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
                     await connection.OpenAsync();

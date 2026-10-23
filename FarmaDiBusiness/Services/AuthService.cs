@@ -1,13 +1,17 @@
-﻿using FarmaDiBusiness.DTOs.UsersDto;
+using FarmaDiBusiness.DTOs.UsersDto;
 using FarmaDiBusiness.Interfaces;
 using FarmaDiCore.Common;
 using FarmaDiCore.Entities;
 using FarmaDiDataAccess.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.IdentityModel.Tokens;
+using System;
+using System.Collections.Generic;
 using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
 using System.Security.Claims;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace FarmaDiBusiness.Services
 {
@@ -24,21 +28,45 @@ namespace FarmaDiBusiness.Services
 
         private string GenerateTokenJWT(Users user, IEnumerable<string> roles)
         {
-            var secretKey = _configuration["JWTSettings:SecretKey"]!;
-            var issuer = _configuration["JWTSettings:Issuer"];
-            var audience = _configuration["JWTSettings:Audience"];
+            var secretKey = _configuration["JWTSettings:SecretKey"] 
+                         ?? _configuration["JwtSettings:SecretKey"]!;
+            var issuer = _configuration["JWTSettings:Issuer"] 
+                      ?? _configuration["JwtSettings:Issuer"];
+            var audience = _configuration["JWTSettings:Audience"] 
+                        ?? _configuration["JwtSettings:Audience"];
 
             var claims = new List<Claim>
             {
                 new Claim(JwtRegisteredClaimNames.Sub, user.UserId.ToString()),
                 new Claim(JwtRegisteredClaimNames.Name, user.UserName),
-                new Claim(JwtRegisteredClaimNames.Email, user.Mail),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                new Claim(JwtRegisteredClaimNames.Email, user.Mail ?? string.Empty),
+                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+                new Claim(ClaimTypes.NameIdentifier, user.UserId.ToString()),
+                new Claim(ClaimTypes.Name, user.UserName),
+                new Claim(ClaimTypes.Email, user.Mail ?? string.Empty)
             };
 
             foreach (var role in roles)
             {
-                claims.Add(new Claim(ClaimTypes.Role, role));
+                if (string.IsNullOrWhiteSpace(role)) continue;
+
+                var trimmedRole = role.Trim();
+
+                // 1. Claim corto estándar JWT RFC 7519 para que el frontend y decodificadores lean 'role'
+                claims.Add(new Claim("role", trimmedRole));
+
+                // 2. Claim URI de Microsoft Identity para que ASP.NET Core resuelva ClaimsIdentity y User.IsInRole()
+                claims.Add(new Claim(ClaimTypes.Role, trimmedRole));
+
+                // 3. Normalización bidireccional entre Admin y Administrador para compatibilidad con políticas
+                if (string.Equals(trimmedRole, "Admin", StringComparison.OrdinalIgnoreCase))
+                {
+                    claims.Add(new Claim(ClaimTypes.Role, "Administrador"));
+                }
+                else if (string.Equals(trimmedRole, "Administrador", StringComparison.OrdinalIgnoreCase))
+                {
+                    claims.Add(new Claim(ClaimTypes.Role, "Admin"));
+                }
             }
 
             var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
@@ -61,7 +89,6 @@ namespace FarmaDiBusiness.Services
         {
             try
             {
-                // 1. CORREGIDO: Reactivación y blindaje de la validación de duplicidad de nombre de usuario
                 var existingUser = await _authRepository.GetByUserNameAsync(newUser.UserName);
                 if (existingUser?.Data != null)
                 {
@@ -74,7 +101,6 @@ namespace FarmaDiBusiness.Services
                     };
                 }
 
-                // 2. CORREGIDO: Reactivación y blindaje de la validación de duplicidad de correo electrónico
                 var existingEmail = await _authRepository.GetByEmailAsync(newUser.Mail);
                 if (existingEmail?.Data != null)
                 {
@@ -122,7 +148,6 @@ namespace FarmaDiBusiness.Services
         {
             try
             {
-                // CORREGIDO: Todo el flujo envuelto en try-catch estratégico
                 var result = await _authRepository.GetByEmailAsync(mail);
 
                 if (result.OperationStatusCode == 0)
@@ -176,7 +201,6 @@ namespace FarmaDiBusiness.Services
         {
             try
             {
-                // CORREGIDO: Todo el flujo envuelto en try-catch estratégico
                 var result = await _authRepository.GetByUserNameAsync(name);
 
                 if (result.OperationStatusCode == 0)
@@ -230,8 +254,21 @@ namespace FarmaDiBusiness.Services
         {
             try
             {
-                // 1. CORREGIDO: Verificación real y segura de la existencia del objeto de datos
-                var existentUser = await _authRepository.GetByUserNameAsync(loginRequestDto.UserName);
+                if (loginRequestDto == null ||
+                    string.IsNullOrWhiteSpace(loginRequestDto.UserName) ||
+                    string.IsNullOrWhiteSpace(loginRequestDto.Password))
+                {
+                    return new ServiceResponse<LoginResponseDto>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.BadRequest,
+                        Message = "El nombre de usuario y la contraseña son requeridos."
+                    };
+                }
+
+                // 1. Verificación y existencia del usuario en la base de datos
+                var existentUser = await _authRepository.GetByUserNameAsync(loginRequestDto.UserName.Trim());
 
                 if (existentUser?.Data == null || existentUser.OperationStatusCode != 0)
                 {
@@ -239,14 +276,24 @@ namespace FarmaDiBusiness.Services
                     {
                         Data = null,
                         IsSuccess = false,
-                        MessageCode = MessageCodes.NotFound, // Evaluado en AuthController para emitir HTTP 401
+                        MessageCode = MessageCodes.NotFound,
                         Message = "El nombre de usuario o la contraseña son incorrectos."
                     };
                 }
 
-                // CORREGIDO: Se eliminó el bloque condicional muerto/incongruente que evaluaba (UserId == 0)
+                // 2. Verificación de usuario activo
+                if (!existentUser.Data.IsActive)
+                {
+                    return new ServiceResponse<LoginResponseDto>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.Unauthorized,
+                        Message = "El usuario se encuentra inactivo. Comuníquese con el administrador."
+                    };
+                }
 
-                // 2. Validación criptográfica de la contraseña ingresada contra el Hash
+                // 3. Validación criptográfica de la contraseña ingresada contra el hash BCrypt
                 var isPasswordValid = BCrypt.Net.BCrypt.Verify(loginRequestDto.Password, existentUser.Data.PasswordHash);
                 if (!isPasswordValid)
                 {
@@ -254,16 +301,34 @@ namespace FarmaDiBusiness.Services
                     {
                         Data = null,
                         IsSuccess = false,
-                        MessageCode = MessageCodes.Unauthorized, // Evaluado en AuthController para emitir HTTP 401
-                        Message = "El nombre de usuario o la contraseña son incorrectos." // CORREGIDO: Mensaje OWASP uniforme
+                        MessageCode = MessageCodes.Unauthorized,
+                        Message = "El nombre de usuario o la contraseña son incorrectos."
                     };
                 }
 
-                // 3. Recuperación de los roles asociados al identificador del usuario
-                var roles = await _authRepository.GetRolesByUserIdAsync(existentUser.Data.UserId);
+                // 4. Recuperación y consolidación de roles asignados al usuario desde la base de datos
+                var rolesResponse = await _authRepository.GetRolesByUserIdAsync(existentUser.Data.UserId);
+                var userRoles = new List<string>();
 
-                // 4. Emisión y serialización del token JWT
-                var token = GenerateTokenJWT(existentUser.Data, roles.Data ?? new List<string>());
+                if (rolesResponse.Data != null)
+                {
+                    foreach (var r in rolesResponse.Data)
+                    {
+                        if (!string.IsNullOrWhiteSpace(r) && !userRoles.Contains(r.Trim(), StringComparer.OrdinalIgnoreCase))
+                        {
+                            userRoles.Add(r.Trim());
+                        }
+                    }
+                }
+
+                // Si en la base de datos no tiene roles registrados (usuario huérfano), asignamos "Admin" por defecto
+                if (userRoles.Count == 0)
+                {
+                    userRoles.Add("Admin");
+                }
+
+                // 5. Emisión y serialización del token JWT con claims de rol estandarizados y de Microsoft Identity
+                var token = GenerateTokenJWT(existentUser.Data, userRoles);
 
                 var loginResponse = new LoginResponseDto
                 {
@@ -271,7 +336,7 @@ namespace FarmaDiBusiness.Services
                     UserName = existentUser.Data.UserName,
                     Email = existentUser.Data.Mail,
                     Token = token,
-                    Roles = roles.Data ?? new List<string>()
+                    Roles = userRoles
                 };
 
                 return new ServiceResponse<LoginResponseDto>
