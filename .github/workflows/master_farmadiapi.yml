@@ -33,7 +33,7 @@ jobs:
       run: dotnet build --configuration Release --no-restore
 
     - name: Publicar artefactos
-      run: dotnet publish -c Release -o ${{ env.OUTPUT_PATH }} --no-build
+      run: dotnet publish FarmaDiApi/FarmaDiApi.csproj -c Release -o ${{ env.OUTPUT_PATH }}
 
     - name: Desplegar hacia Azure WebApp
       uses: azure/webapps-deploy@v3

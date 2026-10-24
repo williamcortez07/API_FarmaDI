@@ -175,8 +175,8 @@ app.UseSwaggerUI(c =>
     c.RoutePrefix = "swagger";
 });
 
-// Redirigir la raíz ("/") directamente a Swagger para fácil acceso
-app.MapGet("/", () => Results.Redirect("/swagger"));
+// Redirigir la raíz ("/") directamente a Swagger con acceso público anónimo
+app.MapGet("/", () => Results.Redirect("/swagger")).AllowAnonymous();
 
 app.UseHttpsRedirection();
 
