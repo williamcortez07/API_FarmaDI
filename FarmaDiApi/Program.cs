@@ -28,8 +28,8 @@ builder.Services.AddSingleton<ILogService, MongoLogService>();
 var JwtSettings = builder.Configuration.GetSection("JwtSettings");
 var secretKey = JwtSettings["SecretKey"];
 
-// Si estamos en entorno de desarrollo local y no se configuró por variable de entorno, proveemos una clave segura para pruebas locales
-if (builder.Environment.IsDevelopment() && string.IsNullOrWhiteSpace(secretKey))
+// Si no se configuró por variable de entorno, proveemos una clave por defecto para evitar caída inmediata en el arranque
+if (string.IsNullOrWhiteSpace(secretKey))
 {
     secretKey = "FarmaDiDevelopmentLocalSecretKey_MustBeAtLeast32BytesLong!";
     builder.Configuration["JwtSettings:SecretKey"] = secretKey;
@@ -167,12 +167,16 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+// Habilitar Swagger siempre (tanto en Desarrollo local como en Producción en Azure)
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "FarmaDi API v1");
+    c.RoutePrefix = "swagger";
+});
+
+// Redirigir la raíz ("/") directamente a Swagger para fácil acceso
+app.MapGet("/", () => Results.Redirect("/swagger"));
 
 app.UseHttpsRedirection();
 
