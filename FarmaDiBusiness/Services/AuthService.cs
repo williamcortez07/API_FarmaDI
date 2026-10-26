@@ -113,13 +113,16 @@ namespace FarmaDiBusiness.Services
                     };
                 }
 
+                // Se asigna explícitamente IsActive = true para garantizar que la cuenta recién registrada
+                // quede activa en la base de datos y no sea rechazada durante el proceso de login.
                 var userToRegister = new Users
                 {
                     UserName = newUser.UserName,
                     UserLastName = newUser.UserLastName,
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword(newUser.Password),
                     Mail = newUser.Mail,
-                    UserPhone = newUser.UserPhone
+                    UserPhone = newUser.UserPhone,
+                    IsActive = true
                 };
 
                 var result = await _authRepository.RegisterAsync(userToRegister);
