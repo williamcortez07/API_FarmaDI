@@ -152,6 +152,9 @@ builder.Services.AddScoped<IUsersRepository, UsersRepository>();
 builder.Services.AddScoped<IKPIDashboardService, KPIDashboardService>();
 builder.Services.AddScoped<IKPIDashboardRepository, DashboardRepository>();
 
+builder.Services.AddScoped<IOlapMetricsService, OlapMetricsService>();
+builder.Services.AddScoped<IOlapMetricsRepository, OlapMetricsRepository>();
+
 builder.Services.AddScoped<IConcentrationServices, ConcentrationServices>();
 builder.Services.AddScoped<IConcentrationRepository, ConcentrationRepository>();
 
