@@ -15,6 +15,7 @@ namespace FarmaDiDataAccess.Interfaces
         Task<RepositoryResponse<Users>> GetByEmailAsync(string email);
         Task<RepositoryResponse<Users>> SetStateAsync(int id, bool state);
         Task<RepositoryResponse<IEnumerable<Roles>>> AssignRoleToUserAsync(int userId, int roleId);
+        Task<RepositoryResponse<IEnumerable<Roles>>> UpdateUserRoleAsync(int userId, int newRoleId);
         Task<RepositoryResponse<(IEnumerable<Users> Items, int TotalCount)>> GetUsersPagedAsync(int pageNumber, int pageSize);
     }
 }

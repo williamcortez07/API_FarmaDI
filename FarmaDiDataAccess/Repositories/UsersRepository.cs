@@ -255,11 +255,15 @@ namespace FarmaDiDataAccess.Repositories
                 using (SqlConnection connection = new SqlConnection(_connectionString))
                 {
                     await connection.OpenAsync();
-                    SqlCommand cmd = new SqlCommand("USP_UpdateUser", connection); // CORREGIDO: Sem�ntica del SP de usuarios
+                    SqlCommand cmd = new SqlCommand("USP_UpdateUser", connection);
                     cmd.CommandType = CommandType.StoredProcedure;
                     cmd.Parameters.AddWithValue("@UserId", id);
                     cmd.Parameters.AddWithValue("@UserName", users.UserName);
+                    cmd.Parameters.AddWithValue("@UserLastName", users.UserLastName);
+                    cmd.Parameters.AddWithValue("@Mail", users.Mail);
+                    cmd.Parameters.AddWithValue("@UserPhone", users.UserPhone);
                     cmd.Parameters.AddWithValue("@IsActive", users.IsActive);
+                    cmd.Parameters.AddWithValue("@PasswordHash", (object?)users.PasswordHash ?? DBNull.Value);
                     cmd.Parameters.Add("@ReturnValue", SqlDbType.Int).Direction = ParameterDirection.ReturnValue;
 
                     Users userUpdateResult = null;
@@ -523,6 +527,59 @@ namespace FarmaDiDataAccess.Repositories
             }
         }
     
+        
+        public async Task<RepositoryResponse<IEnumerable<Roles>>> UpdateUserRoleAsync(int userId, int newRoleId)
+        {
+            var updatedRoles = new List<Roles>();
+            try
+            {
+                using (SqlConnection connection = new SqlConnection(_connectionString))
+                {
+                    await connection.OpenAsync();
+                    SqlCommand cmd = new SqlCommand("USP_UpdateUserRole", connection);
+                    cmd.CommandType = CommandType.StoredProcedure;
+                    cmd.Parameters.AddWithValue("@UserId", userId);
+                    cmd.Parameters.AddWithValue("@NewRolId", newRoleId);
+
+                    using (var reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            updatedRoles.Add(new Roles
+                            {
+                                Id = (int)reader["RolId"],
+                                RolName = reader["RolName"].ToString()!
+                            });
+                        }
+                    }
+                }
+
+                return new RepositoryResponse<IEnumerable<Roles>>
+                {
+                    Data = updatedRoles,
+                    OperationStatusCode = 0,
+                    Message = "Rol actualizado correctamente"
+                };
+            }
+            catch (SqlException ex)
+            {
+                return new RepositoryResponse<IEnumerable<Roles>>
+                {
+                    Data = null,
+                    OperationStatusCode = ex.Number,
+                    Message = ex.Message
+                };
+            }
+            catch (Exception ex)
+            {
+                return new RepositoryResponse<IEnumerable<Roles>>
+                {
+                    Data = null,
+                    OperationStatusCode = -1,
+                    Message = ex.Message
+                };
+            }
+        }
         public async Task<RepositoryResponse<(IEnumerable<Users> Items, int TotalCount)>> GetUsersPagedAsync(int pageNumber, int pageSize)
         {
             var userList = new List<Users>();

@@ -1,4 +1,4 @@
-using FarmaDiBusiness.DTOs.RolsDto;
+﻿using FarmaDiBusiness.DTOs.RolsDto;
 using FarmaDiBusiness.DTOs.UsersDto;
 using FarmaDiBusiness.Interfaces;
 using FarmaDiCore.Common;
@@ -349,6 +349,294 @@ namespace FarmaDiBusiness.Services
             }
         }
     
+        
+        public async Task<ServiceResponse<GetUsers>> UpdateUserAsync(int id, UpdateUserDto userDto, bool isAdmin = true, int currentUserId = 0)
+        {
+            try
+            {
+                // 1. Validar existencia del usuario a actualizar
+                var existingUserResponse = await _userRepository.GetByIdAsync(id);
+                if (existingUserResponse?.Data == null || existingUserResponse.Data.UserId == 0)
+                {
+                    return new ServiceResponse<GetUsers>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.NotFound,
+                        Message = "Usuario no encontrado."
+                    };
+                }
+
+                var currentUser = existingUserResponse.Data;
+
+                // 2. REGLA DE JERARQUÍA Y ESTADO (IsActive):
+                // Se mantiene la misma lógica: solo los admin pueden alterar el estado de usuarios de nivel inferior.
+                bool targetIsActive = currentUser.IsActive;
+
+                if (isAdmin)
+                {
+                    var isTargetAdmin = currentUser.Roles != null && currentUser.Roles.Any(r =>
+                        string.Equals(r.RolName, "Admin", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(r.RolName, "Administrador", StringComparison.OrdinalIgnoreCase));
+
+                    if (isTargetAdmin && id != currentUserId)
+                    {
+                        return new ServiceResponse<GetUsers>
+                        {
+                            Data = null,
+                            IsSuccess = false,
+                            MessageCode = MessageCodes.Conflict,
+                            Message = "Restricción de jerarquía: Solo los usuarios con rol Admin pueden modificar a usuarios de nivel inferior (ej. Vendedor, Empleado). No está permitido modificar a otro Administrador."
+                        };
+                    }
+
+                    if (id == currentUserId && !userDto.IsActive)
+                    {
+                        return new ServiceResponse<GetUsers>
+                        {
+                            Data = null,
+                            IsSuccess = false,
+                            MessageCode = MessageCodes.Conflict,
+                            Message = "No está permitido auto-desactivar su propia cuenta administrativa para prevenir la pérdida de acceso al sistema."
+                        };
+                    }
+
+                    targetIsActive = userDto.IsActive;
+                }
+                else
+                {
+                    // Si el usuario no es admin, no puede modificar su propio estado IsActive; se preserva el estado actual
+                    targetIsActive = currentUser.IsActive;
+                }
+
+                // 3. Validar que el nuevo UserName no esté en conflicto con otro usuario
+                if (!string.Equals(currentUser.UserName, userDto.UserName, StringComparison.OrdinalIgnoreCase))
+                {
+                    var userByName = await _userRepository.GetByUserNameAsync(userDto.UserName);
+                    if (userByName?.Data != null && userByName.Data.UserId != id)
+                    {
+                        return new ServiceResponse<GetUsers>
+                        {
+                            Data = null,
+                            IsSuccess = false,
+                            MessageCode = MessageCodes.Conflict,
+                            Message = "El nombre de usuario ya está en uso por otra cuenta."
+                        };
+                    }
+                }
+
+                // 4. Validar que el nuevo Mail no esté en conflicto con otro usuario
+                if (!string.Equals(currentUser.Mail, userDto.Mail, StringComparison.OrdinalIgnoreCase))
+                {
+                    var userByMail = await _userRepository.GetByEmailAsync(userDto.Mail);
+                    if (userByMail?.Data != null && userByMail.Data.UserId != id)
+                    {
+                        return new ServiceResponse<GetUsers>
+                        {
+                            Data = null,
+                            IsSuccess = false,
+                            MessageCode = MessageCodes.Conflict,
+                            Message = "El correo electrónico ya está en uso por otra cuenta."
+                        };
+                    }
+                }
+
+                // 5. Mapear datos a actualizar (EXCLUYENDO ROL, INCLUYENDO ESTADO ISACTIVE)
+                var userToUpdate = new Users
+                {
+                    UserId = id,
+                    UserName = userDto.UserName.Trim(),
+                    UserLastName = userDto.UserLastName.Trim(),
+                    Mail = userDto.Mail.Trim(),
+                    UserPhone = userDto.UserPhone.Trim(),
+                    IsActive = targetIsActive,
+                    PasswordHash = !string.IsNullOrWhiteSpace(userDto.Password)
+                        ? BCrypt.Net.BCrypt.HashPassword(userDto.Password)
+                        : null!
+                };
+
+                // 6. Persistir cambios en la base de datos
+                var updateResponse = await _userRepository.UpdateAsync(id, userToUpdate);
+                if (updateResponse.OperationStatusCode == 50004)
+                {
+                    return new ServiceResponse<GetUsers>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.NotFound,
+                        Message = "El usuario especificado no fue encontrado."
+                    };
+                }
+                else if (updateResponse.OperationStatusCode == 50005)
+                {
+                    return new ServiceResponse<GetUsers>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.Conflict,
+                        Message = "El nombre de usuario ya está en uso."
+                    };
+                }
+                else if (updateResponse.OperationStatusCode == 50006)
+                {
+                    return new ServiceResponse<GetUsers>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.Conflict,
+                        Message = "El correo electrónico ya está en uso."
+                    };
+                }
+                else if (updateResponse.OperationStatusCode != 0 && updateResponse.OperationStatusCode != -1 && updateResponse.Data == null)
+                {
+                    return new ServiceResponse<GetUsers>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.ErrorDataBase,
+                        Message = updateResponse.Message ?? "Error al actualizar los datos del usuario en la base de datos."
+                    };
+                }
+
+                // 7. Consultar usuario actualizado y conservar sus roles intactos
+                var refreshedUser = await _userRepository.GetByIdAsync(id);
+                var dataUser = refreshedUser.Data ?? updateResponse.Data ?? currentUser;
+
+                var resultDto = new GetUsers
+                {
+                    Id = dataUser.UserId,
+                    UserName = dataUser.UserName,
+                    UserLastName = dataUser.UserLastName,
+                    Mail = dataUser.Mail,
+                    UserPhone = dataUser.UserPhone,
+                    IsActive = dataUser.IsActive,
+                    Roles = (dataUser.Roles ?? currentUser.Roles ?? new List<Roles>()).Select(r => new RolesResponseDto
+                    {
+                        RolId = r.Id,
+                        RolName = r.RolName
+                    }).ToList()
+                };
+
+                return new ServiceResponse<GetUsers>
+                {
+                    Data = resultDto,
+                    IsSuccess = true,
+                    MessageCode = MessageCodes.Success,
+                    Message = "Datos y estado de usuario actualizados correctamente (roles preservados intactos)."
+                };
+            }
+            catch (Exception)
+            {
+                return new ServiceResponse<GetUsers>
+                {
+                    Data = null,
+                    IsSuccess = false,
+                    MessageCode = MessageCodes.ErrorDataBase,
+                    Message = "Ocurrió un error inesperado al actualizar los datos del usuario."
+                };
+            }
+        }
+
+        public async Task<ServiceResponse<IEnumerable<RolesResponseDto>>> UpdateUserRoleAsync(int targetUserId, int newRoleId, int currentAdminUserId)
+        {
+            try
+            {
+                // 1. Validar existencia del usuario objetivo
+                var targetUserResponse = await _userRepository.GetByIdAsync(targetUserId);
+                if (targetUserResponse?.Data == null || targetUserResponse.Data.UserId == 0)
+                {
+                    return new ServiceResponse<IEnumerable<RolesResponseDto>>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.NotFound,
+                        Message = $"El usuario con ID {targetUserId} no fue encontrado."
+                    };
+                }
+
+                var targetUser = targetUserResponse.Data;
+
+                // 2. REGLA DE JERARQUÍA Y SEGURIDAD:
+                // Solo se puede actualizar el rol de usuarios de nivel inferior (ej. Vendedor, Empleado).
+                // No se permite a un admin modificar el rol de otro Administrador ni degradarse a sí mismo.
+                var isTargetAdmin = targetUser.Roles != null && targetUser.Roles.Any(r =>
+                    string.Equals(r.RolName, "Admin", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(r.RolName, "Administrador", StringComparison.OrdinalIgnoreCase));
+
+                if (isTargetAdmin)
+                {
+                    return new ServiceResponse<IEnumerable<RolesResponseDto>>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.Conflict,
+                        Message = "Restricción de jerarquía: Solo los usuarios con rol Admin pueden modificar el rol de usuarios de nivel inferior (ej. Vendedor, Empleado). No está permitido modificar el rol de otro Administrador."
+                    };
+                }
+
+                if (targetUserId == currentAdminUserId)
+                {
+                    return new ServiceResponse<IEnumerable<RolesResponseDto>>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.Conflict,
+                        Message = "No está permitido auto-modificar su propio rol administrativo para evitar pérdida de acceso."
+                    };
+                }
+
+                // 3. Validar existencia del nuevo rol solicitado
+                var newRoleResponse = await _rolesRepository.GetByIdAsync(newRoleId);
+                if (newRoleResponse?.Data == null)
+                {
+                    return new ServiceResponse<IEnumerable<RolesResponseDto>>
+                    {
+                        Data = null,
+                        IsSuccess = false,
+                        MessageCode = MessageCodes.NotFound,
+                        Message = $"El rol con ID {newRoleId} no existe en el sistema."
+                    };
+                }
+
+                // 4. Persistir la actualización de rol en BD
+                var repositoryResult = await _userRepository.UpdateUserRoleAsync(targetUserId, newRoleId);
+
+                if (repositoryResult.OperationStatusCode == 0 && repositoryResult.Data != null)
+                {
+                    var responseRoles = repositoryResult.Data.Select(r => new RolesResponseDto
+                    {
+                        RolId = r.Id,
+                        RolName = r.RolName
+                    }).ToList();
+
+                    return new ServiceResponse<IEnumerable<RolesResponseDto>>
+                    {
+                        Data = responseRoles,
+                        IsSuccess = true,
+                        MessageCode = MessageCodes.Success,
+                        Message = $"Rol actualizado exitosamente al usuario '{targetUser.UserName}'."
+                    };
+                }
+
+                return new ServiceResponse<IEnumerable<RolesResponseDto>>
+                {
+                    Data = null,
+                    IsSuccess = false,
+                    MessageCode = MessageCodes.ErrorDataBase,
+                    Message = repositoryResult.Message ?? "Error al actualizar el rol en la base de datos."
+                };
+            }
+            catch (Exception)
+            {
+                return new ServiceResponse<IEnumerable<RolesResponseDto>>
+                {
+                    Data = null,
+                    IsSuccess = false,
+                    MessageCode = MessageCodes.ErrorDataBase,
+                    Message = "Ocurrió un error inesperado al procesar la actualización del rol."
+                };
+            }
+        }
         public async Task<ServiceResponse<(IEnumerable<GetUsers> Items, int TotalCount)>> GetUsersPagedAsync(int page, int limit)
         {
             try
